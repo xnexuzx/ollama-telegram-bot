@@ -3,19 +3,34 @@
   <a href="">
     <img src="res/github/ollama-telegram-readme-yais.png" alt="ollama telegram logo" width="300" height="300">
   </a>
-  <h1>🦙 Ollama Telegram Bot [YAIS-NXZ]</h1>
+  <h1>🦙Ollama Telegram Bot [YAIS-NXZ]</h1>
   <p>
     <b>Chatea con tus Modelos de Lenguaje (LLMs) directamente desde Telegram.</b><br>
     Una interfaz de bot potente, eficiente y altamente configurable para Ollama.
   </p>
   <br>
+  
+  <div align="center">
+    
+  ![Static Badge](https://img.shields.io/badge/By%3A-YAIS%20LAB-%23FFD700?style=flat&link=https%3A%2F%2Fyaislab.org)
+  ![GitHub stars](https://img.shields.io/github/stars/xnexuzx/ollama-telegram-bot)
+  ![GitHub PRs](https://img.shields.io/github/issues-pr/xnexuzx/ollama-telegram-bot)
+  ![GitHub forks](https://img.shields.io/github/forks/xnexuzx/ollama-telegram-bot)
+  ![GitHub issues](https://img.shields.io/github/issues/xnexuzx/ollama-telegram-bot)
+  
+  ![Ollama](https://img.shields.io/badge/Ollama-0.12.6-187D87?style=flat&logo=ollama&logoColor=white)
+  ![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=flat&logo=python&logoColor=white)
+  ![SQLite](https://img.shields.io/badge/Database-SQLite-003B57?style=flat&logo=sqlite&logoColor=white)
+  ![Batchfile](https://img.shields.io/badge/Scripts-Batchfile-CF4141?style=flat&logo=windows&logoColor=white)
+  </div>
+
   <blockquote>
     <strong>Nota sobre el Origen:</strong> Este es un fork del proyecto original <a href="https://github.com/rikkichy/ollama-telegram">rikkichy/ollama-telegram</a>.
     El código ha sido refactorizado para mejorar la modularidad, añadir nuevas funciones y simplificar drásticamente la instalación en principalmente en Windows. Todo el crédito por el codigo base pertenece a <strong>rikkichy</strong>.
   </blockquote>
 </div>
 
-## 🚀 Instalación (Solo Windows)
+## 🚀 Instalación Rapida (Windows)
 
 La instalación ha sido completamente simplificada con un script Setup interactivo. No necesitas conocimientos técnicos avanzados.
 
@@ -31,7 +46,7 @@ La instalación ha sido completamente simplificada con un script Setup interacti
 
     ```bash
     git clone https://github.com/xnexuzx/ollama-telegram-bot
-    cd ollama-telegram
+    cd ollama-telegram-bot
     ```
 
     _(Reemplaza `xnexuzx` con tu nombre de usuario de GitHub si hiciste Fork)._
@@ -79,7 +94,7 @@ La instalación ha sido completamente simplificada con un script Setup interacti
 
 ---
 
-## 🤖 Comandos del Bot
+## 👨‍💻 Comandos del Bot
 
 ### Comandos para Todos los Usuarios (Autorizados)
 
