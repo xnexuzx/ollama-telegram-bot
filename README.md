@@ -10,7 +10,7 @@
   </p>
   <br>
   <blockquote>
-    <strong>Nota sobre el Origen:</strong> Este es un fork del proyecto original <a href="https://github.com/rikkichy/ollama-telegram-bot">rikkichy/ollama-telegram-bot</a>.
+    <strong>Nota sobre el Origen:</strong> Este es un fork del proyecto original <a href="https://github.com/rikkichy/ollama-telegram">rikkichy/ollama-telegram</a>.
     El código ha sido refactorizado para mejorar la modularidad, añadir nuevas funciones y simplificar drásticamente la instalación en principalmente en Windows. Todo el crédito por el codigo base pertenece a <strong>rikkichy</strong>.
   </blockquote>
 </div>
