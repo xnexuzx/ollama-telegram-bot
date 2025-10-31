@@ -18,11 +18,19 @@ from system_prompts import get_all_system_prompts
 # WARNING: Circular dependencies. This is a temporary step in refactoring.
 # These state variables will be managed properly in the next steps.
 from bot import state
-from bot.state import bot, ACTIVE_CHATS, ACTIVE_CHATS_LOCK, mention, get_bot_info, ensure_system_prompt
+from bot.state import (
+    bot,
+    ACTIVE_CHATS,
+    ACTIVE_CHATS_LOCK,
+    mention,
+    get_bot_info,
+    ensure_system_prompt,
+)
 
 user_router = Router()
 
 # --- Basic Commands ---
+
 
 @user_router.message(CommandStart())
 async def command_start_handler(message: types.Message) -> None:
@@ -33,6 +41,7 @@ async def command_start_handler(message: types.Message) -> None:
         reply_markup=start_kb.as_markup(),
         disable_web_page_preview=True,
     )
+
 
 @user_router.message(Command("history"))
 @perms_allowed
@@ -46,6 +55,7 @@ async def command_get_context_handler(message: types.Message) -> None:
     else:
         await message.answer("No chat history available for this user")
 
+
 @user_router.callback_query(lambda query: query.data == "about")
 async def about_callback_handler(query: types.CallbackQuery):
     dotenv_model = os.getenv("INITMODEL")
@@ -55,7 +65,9 @@ async def about_callback_handler(query: types.CallbackQuery):
         disable_web_page_preview=True,
     )
 
+
 # --- Prompt Selection ---
+
 
 @user_router.message(Command("prompts"))
 @perms_allowed
@@ -66,17 +78,21 @@ async def prompts_command_handler(message: types.Message):
     predefined_prompts = get_all_system_prompts()
     for key, value in predefined_prompts.items():
         prompts_kb.row(
-            types.InlineKeyboardButton(text=f"🤖 {value['name']}", callback_data=f"select_predefined_{key}")
+            types.InlineKeyboardButton(
+                text=f"🤖 {value['name']}", callback_data=f"select_predefined_{key}"
+            )
         )
 
     # Add custom prompts from the database
     custom_prompts = get_global_prompts()
     for prompt_id, name, _ in custom_prompts:
         prompts_kb.row(
-            types.InlineKeyboardButton(text=f"👤 {name}", callback_data=f"select_custom_{prompt_id}")
+            types.InlineKeyboardButton(
+                text=f"👤 {name}", callback_data=f"select_custom_{prompt_id}"
+            )
         )
 
-    prompts_kb.row(types.InlineKeyboardButton(text="❌ Cancel", callback_data="cancel_prompt"))
+    prompts_kb.row(types.InlineKeyboardButton(text="❌ Close", callback_data="close_prompt_menu"))
     await message.answer("Select a System Prompt:", reply_markup=prompts_kb.as_markup())
 
 
@@ -103,39 +119,46 @@ async def select_prompt_handler(query: types.CallbackQuery):
         predefined_prompts = get_all_system_prompts()
         if prompt_key in predefined_prompts:
             prompt_name = predefined_prompts[prompt_key]["name"]
-            
+
             # Use `None` for the default key to make it persistent via fallback
             if prompt_key == "default":
                 update_user_prompt(user_id, None)
                 await query.answer(f"System prompt changed to: {prompt_name}")
-                await query.message.edit_text(f"✅ System prompt changed to: {prompt_name} (persistent)")
+                await query.message.edit_text(
+                    f"✅ System prompt changed to: {prompt_name} (persistent)"
+                )
             else:
                 # For other predefined prompts, apply for the current session only
                 async with ACTIVE_CHATS_LOCK:
                     if user_id not in ACTIVE_CHATS:
-                         ACTIVE_CHATS[user_id] = {"messages": []} # Ensure chat exists
-                    
+                        ACTIVE_CHATS[user_id] = {"messages": []}  # Ensure chat exists
+
                     messages = ACTIVE_CHATS[user_id].get("messages", [])
-                    
+
                     # Remove old system prompt if it exists
                     if messages and messages[0]["role"] == "system":
                         messages.pop(0)
-                    
+
                     # Add new one
                     new_prompt_text = predefined_prompts[prompt_key]["prompt"]
                     messages.insert(0, {"role": "system", "content": new_prompt_text})
                     ACTIVE_CHATS[user_id]["messages"] = messages
 
-                await query.answer(f"Switched to {prompt_name} for this session only.", show_alert=True)
+                await query.answer(
+                    f"Switched to {prompt_name} for this session only.", show_alert=True
+                )
                 await query.message.edit_text(f"✅ Switched to: {prompt_name} (session only)")
         else:
             await query.answer("Unknown predefined prompt.", show_alert=True)
 
-@user_router.callback_query(lambda query: query.data == "cancel_prompt")
+
+@user_router.callback_query(lambda query: query.data == "close_prompt_menu")
 async def cancel_prompt_handler(query: types.CallbackQuery):
-    await query.message.edit_text("Selección de prompt cancelada.")
+    await query.message.delete()
+
 
 # --- Main Message Handling Logic ---
+
 
 @user_router.message()
 @perms_allowed
@@ -149,6 +172,7 @@ async def handle_message(message: types.Message):
         prompt = format_thread_for_prompt(thread)
         await ollama_request(message, prompt)
 
+
 async def is_mentioned_in_group_or_supergroup(message: types.Message):
     if message.chat.type not in ["group", "supergroup"]:
         return False
@@ -158,6 +182,7 @@ async def is_mentioned_in_group_or_supergroup(message: types.Message):
     is_reply_to_bot = message.reply_to_message and message.reply_to_message.from_user.id == bot.id
     return is_mentioned or is_reply_to_bot
 
+
 async def collect_message_thread(message: types.Message, thread=None):
     if thread is None:
         thread = []
@@ -165,6 +190,7 @@ async def collect_message_thread(message: types.Message, thread=None):
     if message.reply_to_message:
         await collect_message_thread(message.reply_to_message, thread)
     return thread
+
 
 def format_thread_for_prompt(thread):
     prompt = "Conversation thread:\n\n"
@@ -174,6 +200,7 @@ def format_thread_for_prompt(thread):
         prompt += f"{sender}: {content}\n\n"
     prompt += "History:"
     return prompt
+
 
 async def process_image(message):
     image_base64 = ""
@@ -205,6 +232,7 @@ async def add_prompt_to_active_chats(message, prompt, image_base64, modelname):
         )
         ACTIVE_CHATS[user_id]["messages"] = messages
 
+
 async def handle_response(message, response_data, full_response):
     full_response_stripped = full_response.strip()
     if full_response_stripped == "":
@@ -220,6 +248,7 @@ async def handle_response(message, response_data, full_response):
         )
         return True
     return False
+
 
 def split_long_message(text, max_length=4000):
     if len(text) <= max_length:
@@ -249,6 +278,7 @@ def split_long_message(text, max_length=4000):
         chunks.append(current_chunk.strip())
     return chunks
 
+
 async def edit_message_progressive(message, sent_message, text):
     try:
         await bot.edit_message_text(
@@ -259,6 +289,7 @@ async def edit_message_progressive(message, sent_message, text):
         )
     except Exception as e:
         logging.warning(f"No se pudo editar mensaje: {e}")
+
 
 async def ollama_request(message: types.Message, prompt: str = None):
     try:

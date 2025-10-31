@@ -21,10 +21,12 @@ admin_router = Router()
 
 # --- Settings and Model Management ---
 
+
 @admin_router.message(Command("settings"))
 @perms_admins
 async def settings_command_handler(message: types.Message) -> None:
-    await message.answer("⚙️ Settings", reply_markup=settings_kb.as_markup())
+    await message.answer("⚙️ Admin Control Panel", reply_markup=settings_kb.as_markup())
+
 
 @admin_router.message(Command("pullmodel"))
 @perms_admins
@@ -39,6 +41,7 @@ async def pull_model_handler(message: types.Message) -> None:
     else:
         await message.answer("Please provide a model name to pull.")
 
+
 @admin_router.callback_query(lambda query: query.data == "switchllm")
 @perms_admins
 async def switchllm_callback_handler(query: types.CallbackQuery):
@@ -49,9 +52,13 @@ async def switchllm_callback_handler(query: types.CallbackQuery):
         switchllm_builder.row(
             types.InlineKeyboardButton(text=model_name, callback_data=f"model_{model_name}")
         )
+    switchllm_builder.row(
+        types.InlineKeyboardButton(text="❌ Back", callback_data="settings_reopen")
+    )
     await query.message.edit_text(
         f"⚙️⚡ {len(models)} MODELS AVAILABLE:", reply_markup=switchllm_builder.as_markup()
     )
+
 
 @admin_router.callback_query(lambda query: query.data.startswith("model_"))
 @perms_admins
@@ -60,8 +67,9 @@ async def model_callback_handler(query: types.CallbackQuery):
     # and modify the variable directly on it.
     new_modelname = query.data.split("model_")[1]
     state.modelname = new_modelname
-    await query.answer(f"Modelo cambiado a: {new_modelname}")
-    await query.message.edit_text(f"✅ Modelo cambiado a: {new_modelname}")
+    await query.answer(f"Model changed to: {new_modelname}")
+    await query.message.edit_text(f"✅ Model changed to: {new_modelname}")
+
 
 @admin_router.callback_query(lambda query: query.data == "delete_model")
 @perms_admins
@@ -73,9 +81,11 @@ async def delete_model_callback_handler(query: types.CallbackQuery):
         delete_model_kb.row(
             types.InlineKeyboardButton(text=model_name, callback_data=f"delete_model_{model_name}")
         )
+    delete_model_kb.row(types.InlineKeyboardButton(text="❌ Back", callback_data="settings_reopen"))
     await query.message.edit_text(
         f"{len(models)} models available for deletion.", reply_markup=delete_model_kb.as_markup()
     )
+
 
 @admin_router.callback_query(lambda query: query.data.startswith("delete_model_"))
 @perms_admins
@@ -87,7 +97,9 @@ async def delete_model_confirm_handler(query: types.CallbackQuery):
     else:
         await query.answer(f"Failed to delete model: {modelname_to_delete}")
 
+
 # --- User Management ---
+
 
 @admin_router.callback_query(lambda query: query.data == "list_users")
 @perms_admins
@@ -100,8 +112,9 @@ async def list_users_callback_handler(query: types.CallbackQuery):
                 text=f"{user_name} ({user_id})", callback_data=f"remove_{user_id}"
             )
         )
-    user_kb.row(types.InlineKeyboardButton(text="Cancel", callback_data="cancel_remove"))
-    await query.message.answer("Select a user to remove:", reply_markup=user_kb.as_markup())
+    user_kb.row(types.InlineKeyboardButton(text="❌ Back", callback_data="settings_reopen"))
+    await query.message.edit_text("Select a user to remove:", reply_markup=user_kb.as_markup())
+
 
 @admin_router.callback_query(lambda query: query.data.startswith("remove_"))
 @perms_admins
@@ -113,10 +126,6 @@ async def remove_user_from_list_handler(query: types.CallbackQuery):
     else:
         await query.answer(f"User {user_id} not found.")
 
-@admin_router.callback_query(lambda query: query.data == "cancel_remove")
-@perms_admins
-async def cancel_remove_handler(query: types.CallbackQuery):
-    await query.message.edit_text("User removal cancelled.")
 
 @admin_router.message(Command("adduser"))
 @perms_admins
@@ -132,6 +141,7 @@ async def add_user_command_handler(message: types.Message):
     except (IndexError, ValueError):
         await message.reply("❌ Incorrect format. Use: `/adduser <user_id> [user_name]`")
 
+
 @admin_router.message(Command("rmuser"))
 @perms_admins
 async def rm_user_command_handler(message: types.Message):
@@ -143,6 +153,7 @@ async def rm_user_command_handler(message: types.Message):
             await message.reply(f"⚠️ User {user_id} was not found in the allowlist.")
     except (IndexError, ValueError):
         await message.reply("❌ Incorrect format. Use: `/rmuser <user_id>`")
+
 
 @admin_router.message(Command("listusers"))
 @perms_admins
@@ -156,7 +167,9 @@ async def list_users_command_handler(message: types.Message):
         user_list += f"- `{user_id}`: {user_name}\n"
     await message.reply(user_list, parse_mode=ParseMode.MARKDOWN)
 
+
 # --- Prompt Management ---
+
 
 @admin_router.callback_query(lambda query: query.data == "admin_prompts")
 @perms_admins
@@ -173,28 +186,34 @@ async def admin_prompts_callback_handler(query: types.CallbackQuery):
     admin_prompts_kb.row(
         types.InlineKeyboardButton(text="🗑️ Delete Prompt", callback_data="delete_prompt_menu")
     )
-    admin_prompts_kb.row(types.InlineKeyboardButton(text="⬅️ Back", callback_data="settings_reopen"))
+    admin_prompts_kb.row(
+        types.InlineKeyboardButton(text="❌ Back", callback_data="settings_reopen")
+    )
     await query.message.edit_text(
         "⚙️ Manage Global Prompts", reply_markup=admin_prompts_kb.as_markup()
     )
 
+
 @admin_router.callback_query(lambda query: query.data == "settings_reopen")
 @perms_admins
 async def settings_reopen_handler(query: types.CallbackQuery):
-    await query.message.edit_text("⚙️ Settings", reply_markup=settings_kb.as_markup())
+    await query.message.edit_text("⚙️ Admin Control Panel", reply_markup=settings_kb.as_markup())
+
 
 @admin_router.callback_query(lambda query: query.data == "add_prompt_start")
 @perms_admins
 async def add_prompt_start_handler(query: types.CallbackQuery, state: FSMContext):
     await state.set_state(PromptStates.awaiting_name)
-    await query.message.edit_text("Nombre corto descriptivo para el nuevo system prompt:")
+    await query.message.edit_text("Enter a short Name for the new System Prompt:")
+
 
 @admin_router.message(PromptStates.awaiting_name)
 @perms_admins
 async def prompt_name_handler(message: types.Message, state: FSMContext):
     await state.update_data(prompt_name=message.text)
     await state.set_state(PromptStates.awaiting_text)
-    await message.reply(f"Texto del system prompt '{message.text}':")
+    await message.reply("Now, Enter the System Prompt:")
+
 
 @admin_router.message(PromptStates.awaiting_text)
 @perms_admins
@@ -204,7 +223,8 @@ async def prompt_text_handler(message: types.Message, state: FSMContext):
     prompt_text = message.text
     add_global_prompt(prompt_name, prompt_text)
     await state.clear()
-    await message.reply(f"✅ El nuevo system prompt '{prompt_name}' ha sido guardado.")
+    await message.reply(f"✅ The new system prompt '{prompt_name}' has been saved.")
+
 
 @admin_router.callback_query(lambda query: query.data == "delete_prompt_menu")
 @perms_admins
@@ -215,10 +235,11 @@ async def delete_prompt_menu_handler(query: types.CallbackQuery):
         delete_prompt_kb.row(
             types.InlineKeyboardButton(text=f"🗑️ {name}", callback_data=f"delete_prompt_{prompt_id}")
         )
-    delete_prompt_kb.row(types.InlineKeyboardButton(text="⬅️ Back", callback_data="admin_prompts"))
+    delete_prompt_kb.row(types.InlineKeyboardButton(text="❌ Back", callback_data="admin_prompts"))
     await query.message.edit_text(
         "Select a prompt to delete:", reply_markup=delete_prompt_kb.as_markup()
     )
+
 
 @admin_router.callback_query(lambda query: query.data.startswith("delete_prompt_"))
 @perms_admins
@@ -227,3 +248,9 @@ async def delete_prompt_confirm_handler(query: types.CallbackQuery):
     delete_global_prompt(prompt_id)
     await query.answer("Prompt deleted successfully.")
     await admin_prompts_callback_handler(query)
+
+
+@admin_router.callback_query(lambda query: query.data == "close_settings")
+@perms_admins
+async def close_settings_handler(query: types.CallbackQuery):
+    await query.message.delete()
