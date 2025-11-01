@@ -16,6 +16,7 @@ from bot.state import ACTIVE_CHATS, ACTIVE_CHATS_LOCK, modelname, ensure_system_
 
 chat_router = Router()
 
+
 @chat_router.message(Command("reset"))
 @perms_allowed
 async def command_reset_handler(message: types.Message) -> None:
@@ -25,7 +26,10 @@ async def command_reset_handler(message: types.Message) -> None:
             ACTIVE_CHATS[user_id]["messages"] = await ensure_system_prompt(user_id, [])
             ACTIVE_CHATS[user_id]["active_session_id"] = None
     logging.info(f"Chat has been reset for {message.from_user.first_name}.")
-    await message.answer("✅ Chat reiniciado. Ahora estás en un chat temporal.")
+    await message.answer(
+        "✅ Chat reiniciado. Ahora estás en un chat temporal."
+    )  # traducir a ingles
+
 
 @chat_router.message(Command("chats"))
 @perms_allowed
@@ -43,16 +47,21 @@ async def command_chat_handler(message: types.Message) -> None:
     chat_kb.row(types.InlineKeyboardButton(text="❌ Close", callback_data="close_menu"))
     await message.answer("Chat Management", reply_markup=chat_kb.as_markup())
 
+
 @chat_router.callback_query(lambda query: query.data == "close_menu")
 async def close_menu_handler(query: types.CallbackQuery):
     await query.message.delete()
+
 
 @chat_router.callback_query(lambda query: query.data == "newchat")
 @perms_allowed
 async def new_chat_start_handler(query: types.CallbackQuery, state: FSMContext):
     await state.set_state(ChatCreationStates.awaiting_name)
-    await query.message.edit_text("Por favor, introduce un nombre para tu nuevo chat:")
+    await query.message.edit_text(
+        "Por favor, introduce un nombre para tu nuevo chat:"
+    )  # traducir a ingles
     await query.answer()
+
 
 @chat_router.message(ChatCreationStates.awaiting_name)
 @perms_allowed
@@ -60,7 +69,9 @@ async def chat_name_handler(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     chat_name = message.text.strip()
     if not chat_name:
-        await message.reply("El nombre no puede estar vacío. Por favor, introduce un nombre para el chat:")
+        await message.reply(
+            "El nombre no puede estar vacío. Por favor, introduce un nombre para el chat:"
+        )  # traducir a ingles
         return
 
     session_id = create_chat_session(user_id, chat_name)
@@ -73,7 +84,10 @@ async def chat_name_handler(message: types.Message, state: FSMContext):
             "messages": messages,
             "stream": True,
         }
-    await message.reply(f"✅ Chat '{chat_name}' creado. Esta conversación ahora se guardará.")
+    await message.reply(
+        f"✅ Chat '{chat_name}' creado. Esta conversación ahora se guardará."
+    )  # traducir a ingles
+
 
 @chat_router.callback_query(lambda query: query.data.startswith("switchchat_"))
 @perms_allowed
@@ -92,6 +106,7 @@ async def switch_chat_handler(query: types.CallbackQuery):
     await query.message.edit_text("✅ Chat loaded successfully.")
     await query.answer()
 
+
 @chat_router.callback_query(lambda query: query.data == "deletechat_menu")
 @perms_admins
 async def delete_chat_menu_handler(query: types.CallbackQuery):
@@ -108,6 +123,7 @@ async def delete_chat_menu_handler(query: types.CallbackQuery):
     await query.message.edit_text("Select a chat to delete:", reply_markup=delete_kb.as_markup())
     await query.answer()
 
+
 @chat_router.callback_query(lambda query: query.data == "chat_menu_main")
 async def chat_menu_main_handler(query: types.CallbackQuery):
     # This handler needs access to the original message to re-trigger the command
@@ -115,6 +131,7 @@ async def chat_menu_main_handler(query: types.CallbackQuery):
     # For now, we just call the function directly.
     await command_chat_handler(query.message)
     await query.answer()
+
 
 @chat_router.callback_query(lambda query: query.data.startswith("delete_session_"))
 @perms_admins
