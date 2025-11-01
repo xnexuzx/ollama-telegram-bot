@@ -40,7 +40,7 @@ async def command_chat_handler(message: types.Message) -> None:
     if len(sessions) < 10:
         chat_kb.row(types.InlineKeyboardButton(text="➕ New Chat", callback_data="newchat"))
     else:
-        chat_kb.row(types.InlineKeyboardButton(text="⚠️ Chat limit reached", callback_data="noop"))
+        chat_kb.row(types.InlineKeyboardButton(text="⚠️ Chats limit reached", callback_data="noop"))
     chat_kb.row(types.InlineKeyboardButton(text="🗑️ Delete Chat", callback_data="deletechat_menu"))
     chat_kb.row(types.InlineKeyboardButton(text="❌ Close", callback_data="close_menu"))
     await message.answer("Chat Management", reply_markup=chat_kb.as_markup())
