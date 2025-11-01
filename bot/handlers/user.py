@@ -334,7 +334,7 @@ async def ollama_request(message: types.Message, prompt: str = None):
                         await bot.edit_message_text(
                             chat_id=message.chat.id,
                             message_id=sent_message.message_id,
-                            text=display_text[:4000] + "\n\n`Continuación...`",  # traducir a ingles
+                            text=display_text[:4000] + "\n\n`To be continued...`",
                             parse_mode=ParseMode.MARKDOWN,
                         )
                         sent_message = await bot.send_message(
