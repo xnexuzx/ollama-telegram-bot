@@ -1,5 +1,7 @@
 import sqlite3
 import uuid
+from bot.utils import count_tokens
+
 
 # From run.py
 def init_db():
@@ -35,6 +37,7 @@ def init_db():
     conn.commit()
     conn.close()
 
+
 # From run.py
 def save_chat_message(user_id, session_id, role, content):
     if session_id is None:
@@ -48,6 +51,7 @@ def save_chat_message(user_id, session_id, role, content):
     conn.commit()
     conn.close()
 
+
 # From func/interactions.py
 def add_global_prompt(name, prompt_text):
     conn = sqlite3.connect("users.db")
@@ -59,6 +63,7 @@ def add_global_prompt(name, prompt_text):
     conn.commit()
     conn.close()
 
+
 # From func/interactions.py
 def get_global_prompts():
     conn = sqlite3.connect("users.db")
@@ -68,6 +73,7 @@ def get_global_prompts():
     conn.close()
     return prompts
 
+
 # From func/interactions.py
 def delete_global_prompt(prompt_id):
     conn = sqlite3.connect("users.db")
@@ -75,6 +81,7 @@ def delete_global_prompt(prompt_id):
     c.execute("DELETE FROM system_prompts WHERE id = ?", (prompt_id,))
     conn.commit()
     conn.close()
+
 
 # From func/interactions.py
 def load_chat_history(session_id, token_limit=4096):
@@ -98,9 +105,7 @@ def load_chat_history(session_id, token_limit=4096):
 
     # Build the history chronologically by inserting at the beginning
     for role, content in all_messages:
-        # Approximate tokens: Words * 1.33
-        word_count = len(content.split())
-        message_tokens = int(word_count * 1.33)
+        message_tokens = count_tokens(content)
 
         if total_tokens + message_tokens > token_limit:
             break
@@ -109,6 +114,7 @@ def load_chat_history(session_id, token_limit=4096):
         total_tokens += message_tokens
 
     return history
+
 
 # From func/interactions.py
 def delete_chat_history(user_id):
@@ -123,6 +129,7 @@ def delete_chat_history(user_id):
     conn.close()
     return deleted
 
+
 # From func/interactions.py
 def get_all_users_from_db():
     conn = sqlite3.connect("users.db")
@@ -133,6 +140,7 @@ def get_all_users_from_db():
     conn.close()
     return users
 
+
 # From func/interactions.py
 def remove_user_from_db(user_id):
     conn = sqlite3.connect("users.db")
@@ -142,6 +150,7 @@ def remove_user_from_db(user_id):
     conn.commit()
     conn.close()
     return removed
+
 
 # From func/interactions.py
 def get_user_chat_sessions(user_id):
@@ -158,6 +167,7 @@ def get_user_chat_sessions(user_id):
     conn.close()
     return sessions
 
+
 # From func/interactions.py
 def create_chat_session(user_id, name):
     """
@@ -173,6 +183,7 @@ def create_chat_session(user_id, name):
     conn.commit()
     conn.close()
     return session_id
+
 
 # From func/interactions.py
 def delete_chat_session(session_id, user_id):
@@ -196,6 +207,7 @@ def delete_chat_session(session_id, user_id):
     conn.close()
     return deleted_sessions
 
+
 # From func/interactions.py
 def add_user_to_db(user_id, user_name):
     """
@@ -213,6 +225,7 @@ def add_user_to_db(user_id, user_name):
         conn.close()
     return was_added
 
+
 # From func/interactions.py
 def update_user_prompt(user_id, prompt_id):
     conn = sqlite3.connect("users.db")
@@ -223,6 +236,7 @@ def update_user_prompt(user_id, prompt_id):
     conn.commit()
     conn.close()
 
+
 # From func/interactions.py
 def get_user_prompt(user_id):
     conn = sqlite3.connect("users.db")
@@ -231,6 +245,7 @@ def get_user_prompt(user_id):
     result = c.fetchone()
     conn.close()
     return result[0] if result and result[0] is not None else None
+
 
 # From func/interactions.py
 def is_user_allowed(user_id):

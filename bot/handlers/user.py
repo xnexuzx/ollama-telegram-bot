@@ -13,6 +13,7 @@ from bot.auth import perms_allowed
 from bot.core.database import get_global_prompts, update_user_prompt, save_chat_message
 from bot.core.ollama import generate
 from bot.ui import start_kb
+from bot.utils import find_safe_split_pos, smart_split
 from system_prompts import get_all_system_prompts
 
 # WARNING: Circular dependencies. This is a temporary step in refactoring.
@@ -28,6 +29,8 @@ from bot.state import (
 )
 
 user_router = Router()
+
+SPINNER_FRAMES = [".", "..", "..."]
 
 # --- Basic Commands ---
 
@@ -220,6 +223,7 @@ async def add_prompt_to_active_chats(message, prompt, image_base64, modelname):
                 "model": state.modelname,
                 "messages": [],
                 "stream": True,
+                "spinner_index": 0,
             }
         messages = ACTIVE_CHATS[user_id]["messages"]
         messages = await ensure_system_prompt(user_id, messages)
@@ -250,35 +254,6 @@ async def handle_response(message, response_data, full_response):
     return False
 
 
-def split_long_message(text, max_length=4000):
-    if len(text) <= max_length:
-        return [text]
-    chunks = []
-    current_chunk = ""
-    paragraphs = text.split("\n\n")
-    for paragraph in paragraphs:
-        if len(current_chunk) + len(paragraph) + 2 > max_length:
-            if current_chunk:
-                chunks.append(current_chunk.strip())
-                current_chunk = paragraph
-            else:
-                sentences = paragraph.split(". ")
-                for sentence in sentences:
-                    if len(current_chunk) + len(sentence) + 2 > max_length:
-                        if current_chunk:
-                            chunks.append(current_chunk.strip())
-                        current_chunk = sentence
-                    else:
-                        current_chunk += (
-                            sentence + ". " if not sentence.endswith(".") else sentence + " "
-                        )
-        else:
-            current_chunk += paragraph + "\n\n" if current_chunk else paragraph + "\n\n"
-    if current_chunk.strip():
-        chunks.append(current_chunk.strip())
-    return chunks
-
-
 async def edit_message_progressive(message, sent_message, text):
     try:
         await bot.edit_message_text(
@@ -288,7 +263,7 @@ async def edit_message_progressive(message, sent_message, text):
             parse_mode=ParseMode.MARKDOWN,
         )
     except Exception as e:
-        logging.warning(f"No se pudo editar mensaje: {e}")
+        logging.warning(f"Could not edit message: {e}")
 
 
 async def ollama_request(message: types.Message, prompt: str = None):
@@ -314,13 +289,18 @@ async def ollama_request(message: types.Message, prompt: str = None):
             chunk = msg.get("content", "")
             full_response += chunk
             if sent_message is None:
-                initial_text = "⚡️ `Generating...`"
+                initial_text = f"`{SPINNER_FRAMES[0]}`"
                 sent_message = await bot.send_message(
                     chat_id=message.chat.id,
                     text=initial_text,
                     parse_mode=ParseMode.MARKDOWN,
                 )
                 last_edit_time = time.time()
+                # Increment spinner index after first use
+                user_chat = ACTIVE_CHATS.get(message.from_user.id, {})
+                user_chat["spinner_index"] = (user_chat.get("spinner_index", 0) + 1) % len(
+                    SPINNER_FRAMES
+                )
             current_time = time.time()
             has_paragraph_break = chunk.endswith("\n\n") or "\n\n" in chunk
             should_edit = (current_time - last_edit_time >= 4.0) or (
@@ -329,26 +309,38 @@ async def ollama_request(message: types.Message, prompt: str = None):
             if should_edit and not response_data.get("done"):
                 display_text = full_response.strip()
                 if display_text:
-                    display_text += "\n\n⚡️ `Generating...`"
-                    if len(display_text) > 4000:
+                    # The text to display is the raw response plus the indicator
+                    user_chat = ACTIVE_CHATS.get(message.from_user.id, {})
+                    spinner_index = user_chat.get("spinner_index", 0)
+                    current_spinner_frame = SPINNER_FRAMES[spinner_index]
+                    text_to_display = f"{full_response.strip()}\n\n`{current_spinner_frame}`"
+                    user_chat["spinner_index"] = (spinner_index + 1) % len(SPINNER_FRAMES)
+
+                    if len(text_to_display) > 4000:
+                        # If the display text is too long, find a safe split in the *raw* response
+                        split_pos = find_safe_split_pos(full_response, 4000)
+                        chunk_to_send = full_response[:split_pos]
+                        remaining_text = full_response[split_pos:]
+
                         await bot.edit_message_text(
                             chat_id=message.chat.id,
                             message_id=sent_message.message_id,
-                            text=display_text[:4000] + "\n\n`To be continued...`",
+                            text=chunk_to_send.strip(),
                             parse_mode=ParseMode.MARKDOWN,
                         )
+                        # Create a new message for the rest of the content
                         sent_message = await bot.send_message(
                             chat_id=message.chat.id,
-                            text="⚡️ `Generating...`",
+                            text=f"`{SPINNER_FRAMES[0]}`",  # Initial text for the new message
                             parse_mode=ParseMode.MARKDOWN,
                         )
-                        full_response = full_response[4000:]
+                        full_response = remaining_text
                     else:
-                        await edit_message_progressive(message, sent_message, display_text)
+                        await edit_message_progressive(message, sent_message, text_to_display)
                     last_edit_time = current_time
             if response_data.get("done"):
                 final_text = f"{full_response.strip()}\n\n⚡ `{state.modelname} in {response_data.get('total_duration') / 1e9:.1f}s.`"
-                message_chunks = split_long_message(final_text)
+                message_chunks = smart_split(final_text)
                 if len(message_chunks) == 1:
                     await bot.edit_message_text(
                         chat_id=message.chat.id,
