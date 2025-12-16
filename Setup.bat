@@ -95,17 +95,9 @@ if "%OLLAMA_BASE_URL%"=="" set "OLLAMA_BASE_URL=localhost"
 echo OLLAMA_BASE_URL=%OLLAMA_BASE_URL%>> .env
 echo OLLAMA_PORT=11434>> .env
 
-:ask_groups
+:ask_model
 echo.
-echo [4/5] Allow the bot to be used by anyone in groups?
-echo       Enter 1 for YES, or 0 for NO.
-set "ALLOW_VAL=0"
-set /p ALLOW_VAL="[Default: 0]> "
-echo ALLOW_ALL_USERS_IN_GROUPS=!ALLOW_VAL!>>.env
-
-:ask_model  
-echo.
-echo [5/5] Enter the default Ollama model name.
+echo [4/4] Enter the default Ollama model name.
 echo       (To see available models, run 'ollama list' in your terminal)
 set /p MODEL_NAME="[Default: qwen3:4b-instruct]> "
 if "%MODEL_NAME%"=="" set "MODEL_NAME=qwen3:4b-instruct"

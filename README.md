@@ -56,11 +56,10 @@ La instalación ha sido completamente simplificada con un script Setup interacti
 
     -   **Creará un entorno virtual** (`venv`) si no existe.
     -   **Instalará todas las dependencias** de Python desde `requirements.txt`.
-    -   **Te hará 5 preguntas sencillas** para generar tu archivo `.env`:
+    -   **Te hará 4 preguntas sencillas** para generar tu archivo `.env`:
         -   Token de tu bot de Telegram (obtenido de [@BotFather](https://t.me/BotFather)).
         -   Tu ID de usuario de Telegram (obtenido de [@userinfobot](https://t.me/userinfobot)).
         -   URL de tu servidor Ollama (por defecto: `localhost`).
-        -   Si permites su uso por cualquier usuario en grupos (por defecto: `0` para No).
         -   Modelo de Ollama por predeterminado al iniciar (por defecto: `qwen3:4b-instruct`).
 
 3.  **Inicia el bot:**
@@ -127,16 +126,15 @@ Desde este menú, los administradores pueden:
 
 ## ⚙️ Configuración de Variables de Entorno (`.env`)
 
-| Parámetro                   | Descripción                                                                                | Requerido |  Valor por Defecto  | Ejemplo                |
-| --------------------------- | ------------------------------------------------------------------------------------------ | :-------: | :-----------------: | ---------------------- |
-| `TOKEN`                     | El token de tu bot de Telegram.                                                            |    Sí     |                     | `123456:ABC-DEF123456` |
-| `ADMIN_IDS`                 | ID numérico del usuario administrador.                                                     |    Sí     |                     | `123456789`            |
-| `INITMODEL`                 | El modelo de Ollama que se cargará por defecto al iniciar el bot.                          |    No     | `qwen3:4b-instruct` | `mistral:latest`       |
-| `OLLAMA_BASE_URL`           | La URL o IP de tu servidor Ollama. Si está en la misma máquina, `localhost` es suficiente. |    No     |     `localhost`     | `192.168.1.100`        |
-| `OLLAMA_PORT`               | El puerto de tu servidor Ollama.                                                           |    No     |       `11434`       | `11434`                |
-| `TIMEOUT`                   | Tiempo máximo en segundos para esperar una respuesta de Ollama.                            |    No     |       `3000`        | `3000`                 |
-| `ALLOW_ALL_USERS_IN_GROUPS` | Si se establece en `1`, permite que cualquier usuario en un grupo interactúe con el bot.   |    No     |         `0`         | `1`                    |
-| `LOG_LEVEL`                 | Nivel de logging del bot.                                                                  |    No     |       `INFO`        | `INFO`                 |
+| Parámetro         | Descripción                                                                                | Requerido |  Valor por Defecto  | Ejemplo                |
+| ----------------- | ------------------------------------------------------------------------------------------ | :-------: | :-----------------: | ---------------------- |
+| `TOKEN`           | El token de tu bot de Telegram.                                                            |    Sí     |                     | `123456:ABC-DEF123456` |
+| `ADMIN_IDS`       | ID numérico del usuario administrador.                                                     |    Sí     |                     | `123456789`            |
+| `INITMODEL`       | El modelo de Ollama que se cargará por defecto al iniciar el bot.                          |    No     | `qwen3:4b-instruct` | `mistral:latest`       |
+| `OLLAMA_BASE_URL` | La URL o IP de tu servidor Ollama. Si está en la misma máquina, `localhost` es suficiente. |    No     |     `localhost`     | `192.168.1.100`        |
+| `OLLAMA_PORT`     | El puerto de tu servidor Ollama.                                                           |    No     |       `11434`       | `11434`                |
+| `TIMEOUT`         | Tiempo máximo en segundos para esperar una respuesta de Ollama.                            |    No     |       `3000`        | `3000`                 |
+| `LOG_LEVEL`       | Nivel de logging del bot.                                                                  |    No     |       `INFO`        | `INFO`                 |
 
 ---
 

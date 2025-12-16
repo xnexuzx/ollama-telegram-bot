@@ -9,7 +9,7 @@ from bot.core.database import is_user_allowed
 load_dotenv()
 
 admin_ids = list(map(int, os.getenv("ADMIN_IDS", "").split(",")))
-allow_all_users_in_groups = bool(int(os.getenv("ALLOW_ALL_USERS_IN_GROUPS", "0")))
+
 
 def perms_allowed(func):
     @wraps(func)
@@ -23,9 +23,8 @@ def perms_allowed(func):
                 return await func(query=query, **kwargs)
         else:
             if message:
+                # In groups, stay silent to avoid spam. In private, show access denied.
                 if message.chat.type in ["supergroup", "group"]:
-                    if allow_all_users_in_groups:
-                        return await func(message, **kwargs)
                     return
                 await message.answer("Access Denied")
             elif query:

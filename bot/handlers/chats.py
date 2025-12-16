@@ -12,7 +12,7 @@ from bot.core.database import (
     delete_chat_session,
 )
 from bot.ui import ChatCreationStates
-from bot.state import ACTIVE_CHATS, ACTIVE_CHATS_LOCK, modelname, ensure_system_prompt
+from bot.state import ACTIVE_CHATS, modelname, ensure_system_prompt
 
 chat_router = Router()
 
@@ -21,10 +21,9 @@ chat_router = Router()
 @perms_allowed
 async def command_reset_handler(message: types.Message) -> None:
     user_id = message.from_user.id
-    async with ACTIVE_CHATS_LOCK:
-        if user_id in ACTIVE_CHATS:
-            ACTIVE_CHATS[user_id]["messages"] = await ensure_system_prompt(user_id, [])
-            ACTIVE_CHATS[user_id]["active_session_id"] = None
+    if user_id in ACTIVE_CHATS:
+        ACTIVE_CHATS[user_id]["messages"] = await ensure_system_prompt(user_id, [])
+        ACTIVE_CHATS[user_id]["active_session_id"] = None
     logging.info(f"Chat has been reset for {message.from_user.first_name}.")
     await message.answer("✅ Chat reset. You are now in a temporary chat.")
 
@@ -70,14 +69,13 @@ async def chat_name_handler(message: types.Message, state: FSMContext):
 
     session_id = create_chat_session(user_id, chat_name)
     await state.clear()
-    async with ACTIVE_CHATS_LOCK:
-        messages = await ensure_system_prompt(user_id, [])
-        ACTIVE_CHATS[user_id] = {
-            "active_session_id": session_id,
-            "model": modelname,
-            "messages": messages,
-            "stream": True,
-        }
+    messages = await ensure_system_prompt(user_id, [])
+    ACTIVE_CHATS[user_id] = {
+        "active_session_id": session_id,
+        "model": modelname,
+        "messages": messages,
+        "stream": True,
+    }
     await message.reply(f"✅ Chat '{chat_name}' created. This conversation will now be saved.")
 
 
@@ -87,14 +85,13 @@ async def switch_chat_handler(query: types.CallbackQuery):
     session_id = query.data.split("_")[1]
     user_id = query.from_user.id
     history = load_chat_history(session_id)
-    async with ACTIVE_CHATS_LOCK:
-        messages = await ensure_system_prompt(user_id, history)
-        ACTIVE_CHATS[user_id] = {
-            "active_session_id": session_id,
-            "model": modelname,
-            "messages": messages,
-            "stream": True,
-        }
+    messages = await ensure_system_prompt(user_id, history)
+    ACTIVE_CHATS[user_id] = {
+        "active_session_id": session_id,
+        "model": modelname,
+        "messages": messages,
+        "stream": True,
+    }
     await query.message.edit_text("✅ Chat loaded successfully.")
     await query.answer()
 
@@ -131,10 +128,9 @@ async def delete_session_handler(query: types.CallbackQuery):
     session_id = query.data.split("_")[2]
     user_id = query.from_user.id
     if delete_chat_session(session_id, user_id):
-        async with ACTIVE_CHATS_LOCK:
-            if ACTIVE_CHATS.get(user_id, {}).get("active_session_id") == session_id:
-                ACTIVE_CHATS[user_id]["active_session_id"] = None
-                ACTIVE_CHATS[user_id]["messages"] = await ensure_system_prompt(user_id, [])
+        if ACTIVE_CHATS.get(user_id, {}).get("active_session_id") == session_id:
+            ACTIVE_CHATS[user_id]["active_session_id"] = None
+            ACTIVE_CHATS[user_id]["messages"] = await ensure_system_prompt(user_id, [])
         await query.answer("Chat deleted successfully.")
     else:
         await query.answer("Failed to delete chat.")

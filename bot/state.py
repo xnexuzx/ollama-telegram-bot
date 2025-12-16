@@ -1,5 +1,4 @@
 import os
-import asyncio
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 from dotenv import load_dotenv
@@ -16,19 +15,10 @@ bot = Bot(token=token)
 dp = Dispatcher(storage=MemoryStorage())
 
 # --- Global State Variables ---
-class contextLock:
-    lock = asyncio.Lock()
-
-    async def __aenter__(self):
-        await self.lock.acquire()
-
-    async def __aexit__(self, exc_type, exc_value, exc_traceback):
-        self.lock.release()
-
 ACTIVE_CHATS = {}
-ACTIVE_CHATS_LOCK = contextLock()
 modelname = os.getenv("INITMODEL")
 mention = None
+
 
 # --- Utility Functions ---
 async def get_bot_info():
@@ -37,6 +27,7 @@ async def get_bot_info():
         get = await bot.get_me()
         mention = f"@{get.username}"
     return mention
+
 
 async def ensure_system_prompt(user_id, messages):
     selected_prompt_id = get_user_prompt(user_id)

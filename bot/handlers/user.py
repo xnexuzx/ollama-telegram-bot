@@ -22,7 +22,6 @@ from bot import state
 from bot.state import (
     bot,
     ACTIVE_CHATS,
-    ACTIVE_CHATS_LOCK,
     mention,
     get_bot_info,
     ensure_system_prompt,
@@ -132,20 +131,19 @@ async def select_prompt_handler(query: types.CallbackQuery):
                 )
             else:
                 # For other predefined prompts, apply for the current session only
-                async with ACTIVE_CHATS_LOCK:
-                    if user_id not in ACTIVE_CHATS:
-                        ACTIVE_CHATS[user_id] = {"messages": []}  # Ensure chat exists
+                if user_id not in ACTIVE_CHATS:
+                    ACTIVE_CHATS[user_id] = {"messages": []}  # Ensure chat exists
 
-                    messages = ACTIVE_CHATS[user_id].get("messages", [])
+                messages = ACTIVE_CHATS[user_id].get("messages", [])
 
-                    # Remove old system prompt if it exists
-                    if messages and messages[0]["role"] == "system":
-                        messages.pop(0)
+                # Remove old system prompt if it exists
+                if messages and messages[0]["role"] == "system":
+                    messages.pop(0)
 
-                    # Add new one
-                    new_prompt_text = predefined_prompts[prompt_key]["prompt"]
-                    messages.insert(0, {"role": "system", "content": new_prompt_text})
-                    ACTIVE_CHATS[user_id]["messages"] = messages
+                # Add new one
+                new_prompt_text = predefined_prompts[prompt_key]["prompt"]
+                messages.insert(0, {"role": "system", "content": new_prompt_text})
+                ACTIVE_CHATS[user_id]["messages"] = messages
 
                 await query.answer(
                     f"Switched to {prompt_name} for this session only.", show_alert=True
@@ -216,25 +214,24 @@ async def process_image(message):
 
 async def add_prompt_to_active_chats(message, prompt, image_base64, modelname):
     user_id = message.from_user.id
-    async with ACTIVE_CHATS_LOCK:
-        if user_id not in ACTIVE_CHATS:
-            ACTIVE_CHATS[user_id] = {
-                "active_session_id": None,
-                "model": state.modelname,
-                "messages": [],
-                "stream": True,
-                "spinner_index": 0,
-            }
-        messages = ACTIVE_CHATS[user_id]["messages"]
-        messages = await ensure_system_prompt(user_id, messages)
-        messages.append(
-            {
-                "role": "user",
-                "content": prompt,
-                "images": ([image_base64] if image_base64 else []),
-            }
-        )
-        ACTIVE_CHATS[user_id]["messages"] = messages
+    if user_id not in ACTIVE_CHATS:
+        ACTIVE_CHATS[user_id] = {
+            "active_session_id": None,
+            "model": state.modelname,
+            "messages": [],
+            "stream": True,
+            "spinner_index": 0,
+        }
+    messages = ACTIVE_CHATS[user_id]["messages"]
+    messages = await ensure_system_prompt(user_id, messages)
+    messages.append(
+        {
+            "role": "user",
+            "content": prompt,
+            "images": ([image_base64] if image_base64 else []),
+        }
+    )
+    ACTIVE_CHATS[user_id]["messages"] = messages
 
 
 async def handle_response(message, response_data, full_response):
@@ -242,11 +239,10 @@ async def handle_response(message, response_data, full_response):
     if full_response_stripped == "":
         return False
     if response_data.get("done"):
-        async with ACTIVE_CHATS_LOCK:
-            if ACTIVE_CHATS.get(message.from_user.id) is not None:
-                ACTIVE_CHATS[message.from_user.id]["messages"].append(
-                    {"role": "assistant", "content": full_response_stripped}
-                )
+        if ACTIVE_CHATS.get(message.from_user.id) is not None:
+            ACTIVE_CHATS[message.from_user.id]["messages"].append(
+                {"role": "assistant", "content": full_response_stripped}
+            )
         logging.info(
             f"[Response]: '{full_response_stripped}' for {message.from_user.first_name} {message.from_user.last_name}"
         )
