@@ -30,6 +30,9 @@ from bot.state import (
 user_router = Router()
 
 SPINNER_FRAMES = [".", "..", "..."]
+SPINNER_UPDATE_INTERVAL = 3.0  # Actualización base cada 3 segundos
+SPINNER_UPDATE_WITH_CONTENT = 2.0  # Con contenido
+SPINNER_UPDATE_PARAGRAPH = 1.0  # Después de párrafo
 
 # --- Basic Commands ---
 
@@ -262,11 +265,70 @@ async def edit_message_progressive(message, sent_message, text):
         logging.warning(f"Could not edit message: {e}")
 
 
+async def update_spinner(message, sent_message, full_response, is_pure_mode):
+    """Actualiza el spinner independientemente del contenido de Ollama"""
+    user_chat = ACTIVE_CHATS.get(message.from_user.id, {})
+    spinner_index = user_chat.get("spinner_index", 0)
+    current_frame = SPINNER_FRAMES[spinner_index]
+
+    if is_pure_mode or not full_response.strip():
+        # Modo puro: solo mostrar spinner (usar MARKDOWN con backticks)
+        spinner_text = f"`{current_frame}`"
+        if sent_message is None:
+            sent_message = await bot.send_message(
+                chat_id=message.chat.id,
+                text=spinner_text,
+                parse_mode=ParseMode.MARKDOWN,
+            )
+        else:
+            # Solo editar si el contenido es diferente
+            if sent_message.text != spinner_text:
+                await edit_message_progressive(message, sent_message, spinner_text)
+    else:
+        # Modo con contenido: combinar texto + spinner (usar MARKDOWN)
+        text_to_display = f"{full_response.strip()}\n\n`{current_frame}`"
+        # Solo editar si el contenido ha cambiado
+        if sent_message is None or sent_message.text != text_to_display:
+            if sent_message is None:
+                sent_message = await bot.send_message(
+                    chat_id=message.chat.id,
+                    text=text_to_display,
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+            else:
+                await edit_message_progressive(message, sent_message, text_to_display)
+
+    # Incrementar índice del spinner
+    user_chat["spinner_index"] = (spinner_index + 1) % len(SPINNER_FRAMES)
+    return sent_message
+
+
+async def transition_to_content_mode(message, sent_message, full_response):
+    """Transición suave del spinner puro al modo con contenido"""
+    user_chat = ACTIVE_CHATS.get(message.from_user.id, {})
+    current_frame = SPINNER_FRAMES[user_chat.get("spinner_index", 0)]
+    initial_text = f"{full_response.strip()}\n\n`{current_frame}`"
+
+    if sent_message is None:
+        sent_message = await bot.send_message(
+            chat_id=message.chat.id,
+            text=initial_text,
+            parse_mode=ParseMode.MARKDOWN,
+        )
+    else:
+        # Solo editar si el contenido es diferente
+        if sent_message.text != initial_text:
+            await edit_message_progressive(message, sent_message, initial_text)
+    return sent_message
+
+
 async def ollama_request(message: types.Message, prompt: str = None):
     try:
         full_response = ""
         last_edit_time = 0
+        last_spinner_update = 0
         sent_message = None
+        spinner_pure_mode = True
         await bot.send_chat_action(message.chat.id, "typing")
         image_base64 = await process_image(message)
         if prompt is None:
@@ -278,38 +340,57 @@ async def ollama_request(message: types.Message, prompt: str = None):
             f"[OllamaAPI]: Processing '{prompt}' for {message.from_user.first_name} {message.from_user.last_name}"
         )
         payload = ACTIVE_CHATS.get(message.from_user.id)
+
+        # Inicializar spinner
+        user_chat = ACTIVE_CHATS.get(message.from_user.id, {})
+        user_chat["spinner_index"] = 0
+
         async for response_data in generate(payload, state.modelname, prompt):
+            current_time = time.time()
             msg = response_data.get("message")
+
+            # Actualizar spinner independientemente del contenido
+            if current_time - last_spinner_update >= SPINNER_UPDATE_INTERVAL:
+                sent_message = await update_spinner(
+                    message, sent_message, full_response, spinner_pure_mode
+                )
+                last_spinner_update = current_time
+
             if msg is None:
                 continue
             chunk = msg.get("content", "")
             full_response += chunk
-            if sent_message is None:
-                initial_text = f"`{SPINNER_FRAMES[0]}`"
+
+            # Al llegar el primer contenido, cambiar a modo con contenido
+            if spinner_pure_mode and full_response.strip():
+                spinner_pure_mode = False
+                # Transición suave: combinar contenido actual con spinner
+                sent_message = await transition_to_content_mode(
+                    message, sent_message, full_response
+                )
+
+            if sent_message is None and full_response.strip():
+                # Si llegamos aquí, ya hay contenido, mostrarlo con spinner (MARKDOWN)
+                initial_text = f"{full_response.strip()}\n\n`{SPINNER_FRAMES[0]}`"
                 sent_message = await bot.send_message(
                     chat_id=message.chat.id,
                     text=initial_text,
                     parse_mode=ParseMode.MARKDOWN,
                 )
-                last_edit_time = time.time()
-                # Increment spinner index after first use
-                user_chat = ACTIVE_CHATS.get(message.from_user.id, {})
-                user_chat["spinner_index"] = (user_chat.get("spinner_index", 0) + 1) % len(
-                    SPINNER_FRAMES
-                )
-            current_time = time.time()
+                last_edit_time = current_time
+                user_chat["spinner_index"] = 1
+
             has_paragraph_break = chunk.endswith("\n\n") or "\n\n" in chunk
-            should_edit = (current_time - last_edit_time >= 4.0) or (
-                has_paragraph_break and current_time - last_edit_time >= 1.0
+            should_edit = (current_time - last_edit_time >= SPINNER_UPDATE_WITH_CONTENT) or (
+                has_paragraph_break and current_time - last_edit_time >= SPINNER_UPDATE_PARAGRAPH
             )
+
             if should_edit and not response_data.get("done"):
                 display_text = full_response.strip()
                 if display_text:
-                    # The text to display is the raw response plus the indicator
-                    user_chat = ACTIVE_CHATS.get(message.from_user.id, {})
                     spinner_index = user_chat.get("spinner_index", 0)
                     current_spinner_frame = SPINNER_FRAMES[spinner_index]
-                    text_to_display = f"{full_response.strip()}\n\n`{current_spinner_frame}`"
+                    text_to_display = f"{display_text}\n\n`{current_spinner_frame}`"
                     user_chat["spinner_index"] = (spinner_index + 1) % len(SPINNER_FRAMES)
 
                     if len(text_to_display) > 4000:
@@ -331,9 +412,13 @@ async def ollama_request(message: types.Message, prompt: str = None):
                             parse_mode=ParseMode.MARKDOWN,
                         )
                         full_response = remaining_text
+                        spinner_pure_mode = False  # Ya hay contenido
                     else:
-                        await edit_message_progressive(message, sent_message, text_to_display)
+                        # Solo editar si el contenido ha cambiado
+                        if sent_message is None or sent_message.text != text_to_display:
+                            await edit_message_progressive(message, sent_message, text_to_display)
                     last_edit_time = current_time
+
             if response_data.get("done"):
                 final_text = f"{full_response.strip()}\n\n⚡ `{state.modelname} in {response_data.get('total_duration') / 1e9:.1f}s.`"
                 message_chunks = smart_split(final_text)
@@ -341,7 +426,7 @@ async def ollama_request(message: types.Message, prompt: str = None):
                     await bot.edit_message_text(
                         chat_id=message.chat.id,
                         message_id=sent_message.message_id,
-                        text=final_text,
+                        text=message_chunks[0],
                         parse_mode=ParseMode.MARKDOWN,
                     )
                 else:
@@ -353,7 +438,9 @@ async def ollama_request(message: types.Message, prompt: str = None):
                     )
                     for chunk in message_chunks[1:]:
                         await bot.send_message(
-                            chat_id=message.chat.id, text=chunk, parse_mode=ParseMode.MARKDOWN
+                            chat_id=message.chat.id,
+                            text=chunk,
+                            parse_mode=ParseMode.MARKDOWN,
                         )
                 await handle_response(message, response_data, full_response)
                 session_id = ACTIVE_CHATS.get(message.from_user.id, {}).get("active_session_id")
