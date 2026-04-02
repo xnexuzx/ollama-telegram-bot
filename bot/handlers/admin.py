@@ -12,6 +12,7 @@ from bot.core.database import (
     get_global_prompts,
     add_global_prompt,
     delete_global_prompt,
+    set_bot_config,
 )
 from bot.core.ollama import model_list, manage_model
 from bot.ui import settings_kb, PromptStates
@@ -67,6 +68,8 @@ async def model_callback_handler(query: types.CallbackQuery):
     # and modify the variable directly on it.
     new_modelname = query.data.split("model_")[1]
     state.modelname = new_modelname
+    # Persist the model selection to database
+    set_bot_config("current_model", new_modelname)
     await query.answer(f"Model changed to: {new_modelname}")
     await query.message.edit_text(f"✅ Model changed to: {new_modelname}")
 

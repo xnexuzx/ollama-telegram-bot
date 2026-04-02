@@ -1,9 +1,10 @@
 import os
 import logging
-import traceback
 import io
 import base64
 import time
+import aiohttp
+import asyncio
 from aiogram import types, Router
 from aiogram.enums import ParseMode
 from aiogram.filters.command import Command, CommandStart
@@ -11,7 +12,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.auth import perms_allowed
 from bot.core.database import get_global_prompts, update_user_prompt, save_chat_message
-from bot.core.ollama import generate
+from bot.core.ollama import generate, model_supports_vision
 from bot.ui import start_kb
 from bot.utils import find_safe_split_pos, smart_split
 from system_prompts import get_all_system_prompts
@@ -25,6 +26,7 @@ from bot.state import (
     mention,
     get_bot_info,
     ensure_system_prompt,
+    cleanup_inactive_chats,
 )
 
 user_router = Router()
@@ -39,6 +41,11 @@ SPINNER_UPDATE_PARAGRAPH = 1.0  # Después de párrafo
 
 @user_router.message(CommandStart())
 async def command_start_handler(message: types.Message) -> None:
+    """
+    Handle the /start command.
+
+    Sends a welcome message with the user's name and the main keyboard.
+    """
     start_message = f"Welcome, <b>{message.from_user.full_name}</b>!"
     await message.answer(
         start_message,
@@ -51,6 +58,11 @@ async def command_start_handler(message: types.Message) -> None:
 @user_router.message(Command("history"))
 @perms_allowed
 async def command_get_context_handler(message: types.Message) -> None:
+    """
+    Handle the /history command.
+
+    Displays the current conversation history for the user in Markdown format.
+    """
     if message.from_user.id in ACTIVE_CHATS:
         messages = ACTIVE_CHATS.get(message.from_user.id)["messages"]
         context = ""
@@ -62,7 +74,12 @@ async def command_get_context_handler(message: types.Message) -> None:
 
 
 @user_router.callback_query(lambda query: query.data == "about")
-async def about_callback_handler(query: types.CallbackQuery):
+async def about_callback_handler(query: types.CallbackQuery) -> None:
+    """
+    Handle the 'About' callback from the start menu.
+
+    Shows bot information: current model, default model, license and source code link.
+    """
     dotenv_model = os.getenv("INITMODEL")
     await query.message.answer(
         f"<b>Your LLMs</b>\nCurrently using: <code>{state.modelname}</code>\nDefault in .env: <code>{dotenv_model}</code>\nThis project is under <a href='https://github.com/ruecat/ollama-telegram/blob/main/LICENSE'>MIT License.</a>\n<a href='https://github.com/ruecat/ollama-telegram'>Source Code</a>",
@@ -76,7 +93,13 @@ async def about_callback_handler(query: types.CallbackQuery):
 
 @user_router.message(Command("prompts"))
 @perms_allowed
-async def prompts_command_handler(message: types.Message):
+async def prompts_command_handler(message: types.Message) -> None:
+    """
+    Handle the /prompts command.
+
+    Displays an inline keyboard with all available system prompts
+    (predefined from system_prompts.py and custom from database).
+    """
     prompts_kb = InlineKeyboardBuilder()
 
     # Add predefined system prompts from system_prompts.py
@@ -102,18 +125,24 @@ async def prompts_command_handler(message: types.Message):
 
 
 @user_router.callback_query(lambda query: query.data.startswith("select_"))
-async def select_prompt_handler(query: types.CallbackQuery):
+async def select_prompt_handler(query: types.CallbackQuery) -> None:
+    """
+    Handle prompt selection from the /prompts menu.
+
+    Supports both predefined prompts (from system_prompts.py) and
+    custom prompts (from database). Selection is persisted to user profile.
+    """
     user_id = query.from_user.id
     parts = query.data.split("_")
     prompt_type = parts[1]
     prompt_key = "_".join(parts[2:])
 
     if prompt_type == "custom":
-        prompt_id_to_save = int(prompt_key)
+        prompt_id_to_save = prompt_key  # Save as string
         prompts = get_global_prompts()
         prompt_name = "Unknown"
         for p_id, name, _ in prompts:
-            if p_id == prompt_id_to_save:
+            if str(p_id) == prompt_id_to_save:
                 prompt_name = name
                 break
         update_user_prompt(user_id, prompt_id_to_save)
@@ -124,40 +153,22 @@ async def select_prompt_handler(query: types.CallbackQuery):
         predefined_prompts = get_all_system_prompts()
         if prompt_key in predefined_prompts:
             prompt_name = predefined_prompts[prompt_key]["name"]
-
-            # Use `None` for the default key to make it persistent via fallback
-            if prompt_key == "default":
-                update_user_prompt(user_id, None)
-                await query.answer(f"System prompt changed to: {prompt_name}")
-                await query.message.edit_text(
-                    f"✅ System prompt changed to: {prompt_name} (persistent)"
-                )
-            else:
-                # For other predefined prompts, apply for the current session only
-                if user_id not in ACTIVE_CHATS:
-                    ACTIVE_CHATS[user_id] = {"messages": []}  # Ensure chat exists
-
-                messages = ACTIVE_CHATS[user_id].get("messages", [])
-
-                # Remove old system prompt if it exists
-                if messages and messages[0]["role"] == "system":
-                    messages.pop(0)
-
-                # Add new one
-                new_prompt_text = predefined_prompts[prompt_key]["prompt"]
-                messages.insert(0, {"role": "system", "content": new_prompt_text})
-                ACTIVE_CHATS[user_id]["messages"] = messages
-
-                await query.answer(
-                    f"Switched to {prompt_name} for this session only.", show_alert=True
-                )
-                await query.message.edit_text(f"✅ Switched to: {prompt_name} (session only)")
+            # Save the predefined key as string (None for default, string key for others)
+            prompt_value = None if prompt_key == "default" else prompt_key
+            update_user_prompt(user_id, prompt_value)
+            await query.answer(f"System prompt changed to: {prompt_name}")
+            await query.message.edit_text(
+                f"✅ System prompt changed to: {prompt_name} (persistent)"
+            )
         else:
             await query.answer("Unknown predefined prompt.", show_alert=True)
 
 
 @user_router.callback_query(lambda query: query.data == "close_prompt_menu")
-async def cancel_prompt_handler(query: types.CallbackQuery):
+async def cancel_prompt_handler(query: types.CallbackQuery) -> None:
+    """
+    Close the prompts menu by deleting the message.
+    """
     await query.message.delete()
 
 
@@ -166,7 +177,14 @@ async def cancel_prompt_handler(query: types.CallbackQuery):
 
 @user_router.message()
 @perms_allowed
-async def handle_message(message: types.Message):
+async def handle_message(message: types.Message) -> None:
+    """
+    Main message handler for all authorized users.
+
+    Routes messages to ollama_request based on chat type:
+    - Private chats: direct processing
+    - Groups/supergroups: only if bot is mentioned or replied to
+    """
     await get_bot_info()
     if message.chat.type == "private":
         await ollama_request(message)
@@ -177,7 +195,14 @@ async def handle_message(message: types.Message):
         await ollama_request(message, prompt)
 
 
-async def is_mentioned_in_group_or_supergroup(message: types.Message):
+async def is_mentioned_in_group_or_supergroup(message: types.Message) -> bool:
+    """
+    Check if the bot is mentioned in a group/supergroup message.
+
+    Returns True if:
+    - Message starts with bot's mention
+    - Message is a reply to the bot
+    """
     if message.chat.type not in ["group", "supergroup"]:
         return False
     is_mentioned = (message.text and message.text.startswith(mention)) or (
@@ -187,7 +212,17 @@ async def is_mentioned_in_group_or_supergroup(message: types.Message):
     return is_mentioned or is_reply_to_bot
 
 
-async def collect_message_thread(message: types.Message, thread=None):
+async def collect_message_thread(message: types.Message, thread=None) -> list:
+    """
+    Recursively collect the reply thread for a message.
+
+    Args:
+        message: The starting message
+        thread: Accumulator for recursion (internal)
+
+    Returns:
+        List of messages in chronological order (oldest first)
+    """
     if thread is None:
         thread = []
     thread.insert(0, message)
@@ -196,7 +231,16 @@ async def collect_message_thread(message: types.Message, thread=None):
     return thread
 
 
-def format_thread_for_prompt(thread):
+def format_thread_for_prompt(thread) -> str:
+    """
+    Format a thread of messages into a prompt for the LLM.
+
+    Args:
+        thread: List of message objects
+
+    Returns:
+        Formatted string with sender and content for each message
+    """
     prompt = "Conversation thread:\n\n"
     for msg in thread:
         sender = "User" if msg.from_user.id != bot.id else "Bot"
@@ -206,7 +250,16 @@ def format_thread_for_prompt(thread):
     return prompt
 
 
-async def process_image(message):
+async def process_image(message: types.Message) -> str:
+    """
+    Extract and encode image from message if present.
+
+    Args:
+        message: Telegram message that may contain a photo
+
+    Returns:
+        Base64-encoded image string, or empty string if no image
+    """
     image_base64 = ""
     if message.content_type == "photo":
         image_buffer = io.BytesIO()
@@ -215,7 +268,14 @@ async def process_image(message):
     return image_base64
 
 
-async def add_prompt_to_active_chats(message, prompt, image_base64, modelname):
+async def add_prompt_to_active_chats(
+    message: types.Message, prompt: str, image_base64: str, modelname: str
+):
+    """
+    Add a user message (with optional image) to the active chat history.
+
+    Ensures system prompt is at the beginning and updates last_activity timestamp.
+    """
     user_id = message.from_user.id
     if user_id not in ACTIVE_CHATS:
         ACTIVE_CHATS[user_id] = {
@@ -224,7 +284,10 @@ async def add_prompt_to_active_chats(message, prompt, image_base64, modelname):
             "messages": [],
             "stream": True,
             "spinner_index": 0,
+            "last_activity": time.time(),
         }
+    else:
+        ACTIVE_CHATS[user_id]["last_activity"] = time.time()
     messages = ACTIVE_CHATS[user_id]["messages"]
     messages = await ensure_system_prompt(user_id, messages)
     messages.append(
@@ -237,7 +300,18 @@ async def add_prompt_to_active_chats(message, prompt, image_base64, modelname):
     ACTIVE_CHATS[user_id]["messages"] = messages
 
 
-async def handle_response(message, response_data, full_response):
+async def handle_response(message: types.Message, response_data: dict, full_response: str) -> bool:
+    """
+    Handle the final response from Ollama.
+
+    Args:
+        message: Original user message
+        response_data: Response payload from Ollama
+        full_response: Complete response text
+
+    Returns:
+        True if response was handled (done=True), False otherwise
+    """
     full_response_stripped = full_response.strip()
     if full_response_stripped == "":
         return False
@@ -253,7 +327,17 @@ async def handle_response(message, response_data, full_response):
     return False
 
 
-async def edit_message_progressive(message, sent_message, text):
+async def edit_message_progressive(
+    message: types.Message, sent_message: types.Message, text: str
+) -> None:
+    """
+    Safely edit a message, catching and logging any Telegram API errors.
+
+    Args:
+        message: Original message (for chat_id)
+        sent_message: Message to edit
+        text: New text content
+    """
     try:
         await bot.edit_message_text(
             chat_id=message.chat.id,
@@ -265,8 +349,21 @@ async def edit_message_progressive(message, sent_message, text):
         logging.warning(f"Could not edit message: {e}")
 
 
-async def update_spinner(message, sent_message, full_response, is_pure_mode):
-    """Actualiza el spinner independientemente del contenido de Ollama"""
+async def update_spinner(
+    message: types.Message, sent_message: types.Message, full_response: str, is_pure_mode: bool
+) -> types.Message:
+    """
+    Update the spinner animation independently of Ollama content.
+
+    Args:
+        message: Original user message
+        sent_message: Current spinner message to update
+        full_response: Accumulated response text so far
+        is_pure_mode: True if only spinner is shown (no content yet)
+
+    Returns:
+        Updated sent_message object
+    """
     user_chat = ACTIVE_CHATS.get(message.from_user.id, {})
     spinner_index = user_chat.get("spinner_index", 0)
     current_frame = SPINNER_FRAMES[spinner_index]
@@ -303,8 +400,20 @@ async def update_spinner(message, sent_message, full_response, is_pure_mode):
     return sent_message
 
 
-async def transition_to_content_mode(message, sent_message, full_response):
-    """Transición suave del spinner puro al modo con contenido"""
+async def transition_to_content_mode(
+    message: types.Message, sent_message: types.Message, full_response: str
+) -> types.Message:
+    """
+    Smoothly transition from pure spinner to content mode when first token arrives.
+
+    Args:
+        message: Original user message
+        sent_message: Current spinner message
+        full_response: First chunk of response text
+
+    Returns:
+        Updated sent_message with content + spinner
+    """
     user_chat = ACTIVE_CHATS.get(message.from_user.id, {})
     current_frame = SPINNER_FRAMES[user_chat.get("spinner_index", 0)]
     initial_text = f"{full_response.strip()}\n\n`{current_frame}`"
@@ -323,7 +432,26 @@ async def transition_to_content_mode(message, sent_message, full_response):
 
 
 async def ollama_request(message: types.Message, prompt: str = None):
+    """
+    Main request handler for interacting with Ollama API.
+
+    Args:
+        message: Telegram message from user
+        prompt: Optional explicit prompt (used for group thread context)
+
+    Flow:
+        1. Cleanup inactive chats if threshold exceeded
+        2. Extract image if present and validate vision support
+        3. Build payload with system prompt, user message, and images
+        4. Stream response from Ollama with progressive editing
+        5. Handle errors with specific user-friendly messages
+        6. Save assistant response to chat history
+    """
     try:
+        # Limpieza automática de chats inactivos (umbral: 100 entradas)
+        if len(ACTIVE_CHATS) > 100:
+            cleanup_inactive_chats(timeout_hours=12)
+
         full_response = ""
         last_edit_time = 0
         last_spinner_update = 0
@@ -331,6 +459,18 @@ async def ollama_request(message: types.Message, prompt: str = None):
         spinner_pure_mode = True
         await bot.send_chat_action(message.chat.id, "typing")
         image_base64 = await process_image(message)
+
+        # Validate image support if an image was provided
+        if image_base64:
+            if not model_supports_vision(state.modelname):
+                await bot.send_message(
+                    chat_id=message.chat.id,
+                    text=f"❌ The model '{state.modelname}' does not support image input. "
+                    f"Please switch to a vision-capable model using /settings.",
+                    parse_mode=ParseMode.HTML,
+                )
+                return
+
         if prompt is None:
             prompt = message.text or message.caption
         session_id = ACTIVE_CHATS.get(message.from_user.id, {}).get("active_session_id")
@@ -448,10 +588,88 @@ async def ollama_request(message: types.Message, prompt: str = None):
                     message.from_user.id, session_id, "assistant", full_response.strip()
                 )
                 break
-    except Exception as e:
-        print(f"-----\n[OllamaAPI-ERR] CAUGHT FAULT!\n{traceback.format_exc()}\n-----")
+    except aiohttp.ClientResponseError as e:
+        # Error HTTP específico (404, 500, etc.)
+        logging.error(f"Ollama HTTP error {e.status}: {e.message}", exc_info=True)
+
+        # Limpiar spinner si existe
+        if sent_message:
+            try:
+                await bot.delete_message(
+                    chat_id=message.chat.id, message_id=sent_message.message_id
+                )
+            except Exception as delete_error:
+                logging.warning(f"Could not delete spinner: {delete_error}")
+
+        # Mensaje específico según código HTTP
+        if e.status == 404:
+            error_msg = f"❌ Model '{state.modelname}' not found. Use /settings to download or switch models."
+        elif e.status == 500:
+            error_msg = "❌ Ollama server error. The model may be corrupted or unavailable."
+        else:
+            error_msg = f"❌ Ollama returned HTTP {e.status}. Please check the server logs."
+
         await bot.send_message(
             chat_id=message.chat.id,
-            text=f"Something went wrong: {str(e)}",
+            text=error_msg,
+            parse_mode=ParseMode.HTML,
+        )
+    except aiohttp.ClientError as e:
+        # Otros errores de conexión (conexión rechazada, timeout de conexión, etc.)
+        logging.error(f"Ollama connection error: {e}", exc_info=True)
+
+        # Limpiar spinner si existe
+        if sent_message:
+            try:
+                await bot.delete_message(
+                    chat_id=message.chat.id, message_id=sent_message.message_id
+                )
+            except Exception as delete_error:
+                logging.warning(f"Could not delete spinner: {delete_error}")
+
+        error_msg = "❌ Cannot connect to Ollama. Please check if the server is running at the configured URL."
+        await bot.send_message(
+            chat_id=message.chat.id,
+            text=error_msg,
+            parse_mode=ParseMode.HTML,
+        )
+    except asyncio.TimeoutError:
+        # Timeout general
+        logging.error("Ollama request timeout", exc_info=True)
+
+        # Limpiar spinner si existe
+        if sent_message:
+            try:
+                await bot.delete_message(
+                    chat_id=message.chat.id, message_id=sent_message.message_id
+                )
+            except Exception as delete_error:
+                logging.warning(f"Could not delete spinner: {delete_error}")
+
+        error_msg = (
+            "❌ Ollama is taking too long to respond. Try a shorter prompt or check the model."
+        )
+        await bot.send_message(
+            chat_id=message.chat.id,
+            text=error_msg,
+            parse_mode=ParseMode.HTML,
+        )
+    except Exception as e:
+        # Cualquier otro error inesperado
+        logging.error(f"Unexpected error in ollama_request: {e}", exc_info=True)
+
+        # Limpiar spinner si existe
+        if sent_message:
+            try:
+                await bot.delete_message(
+                    chat_id=message.chat.id, message_id=sent_message.message_id
+                )
+            except Exception as delete_error:
+                logging.warning(f"Could not delete spinner: {delete_error}")
+
+        error_msg = "❌ An unexpected error occurred. The incident has been logged."
+        await bot.send_message(
+            chat_id=message.chat.id,
+            text=error_msg,
             parse_mode=ParseMode.HTML,
         )
