@@ -14,7 +14,7 @@ from bot.auth import perms_allowed
 from bot.core.database import get_global_prompts, update_user_prompt, save_chat_message
 from bot.core.ollama import generate, model_supports_vision
 from bot.ui import start_kb
-from bot.utils import find_safe_split_pos, smart_split
+from bot.utils import smart_split
 from system_prompts import get_all_system_prompts
 
 # WARNING: Circular dependencies. This is a temporary step in refactoring.
@@ -31,10 +31,6 @@ from bot.state import (
 
 user_router = Router()
 
-SPINNER_FRAMES = [".", "..", "..."]
-SPINNER_UPDATE_INTERVAL = 3.0  # Actualización base cada 3 segundos
-SPINNER_UPDATE_WITH_CONTENT = 2.0  # Con contenido
-SPINNER_UPDATE_PARAGRAPH = 1.0  # Después de párrafo
 
 # --- Basic Commands ---
 
@@ -283,7 +279,6 @@ async def add_prompt_to_active_chats(
             "model": state.modelname,
             "messages": [],
             "stream": True,
-            "spinner_index": 0,
             "last_activity": time.time(),
         }
     else:
@@ -327,110 +322,6 @@ async def handle_response(message: types.Message, response_data: dict, full_resp
     return False
 
 
-async def edit_message_progressive(
-    message: types.Message, sent_message: types.Message, text: str
-) -> None:
-    """
-    Safely edit a message, catching and logging any Telegram API errors.
-
-    Args:
-        message: Original message (for chat_id)
-        sent_message: Message to edit
-        text: New text content
-    """
-    try:
-        await bot.edit_message_text(
-            chat_id=message.chat.id,
-            message_id=sent_message.message_id,
-            text=text,
-            parse_mode=ParseMode.MARKDOWN,
-        )
-    except Exception as e:
-        logging.warning(f"Could not edit message: {e}")
-
-
-async def update_spinner(
-    message: types.Message, sent_message: types.Message, full_response: str, is_pure_mode: bool
-) -> types.Message:
-    """
-    Update the spinner animation independently of Ollama content.
-
-    Args:
-        message: Original user message
-        sent_message: Current spinner message to update
-        full_response: Accumulated response text so far
-        is_pure_mode: True if only spinner is shown (no content yet)
-
-    Returns:
-        Updated sent_message object
-    """
-    user_chat = ACTIVE_CHATS.get(message.from_user.id, {})
-    spinner_index = user_chat.get("spinner_index", 0)
-    current_frame = SPINNER_FRAMES[spinner_index]
-
-    if is_pure_mode or not full_response.strip():
-        # Modo puro: solo mostrar spinner (usar MARKDOWN con backticks)
-        spinner_text = f"`{current_frame}`"
-        if sent_message is None:
-            sent_message = await bot.send_message(
-                chat_id=message.chat.id,
-                text=spinner_text,
-                parse_mode=ParseMode.MARKDOWN,
-            )
-        else:
-            # Solo editar si el contenido es diferente
-            if sent_message.text != spinner_text:
-                await edit_message_progressive(message, sent_message, spinner_text)
-    else:
-        # Modo con contenido: combinar texto + spinner (usar MARKDOWN)
-        text_to_display = f"{full_response.strip()}\n\n`{current_frame}`"
-        # Solo editar si el contenido ha cambiado
-        if sent_message is None or sent_message.text != text_to_display:
-            if sent_message is None:
-                sent_message = await bot.send_message(
-                    chat_id=message.chat.id,
-                    text=text_to_display,
-                    parse_mode=ParseMode.MARKDOWN,
-                )
-            else:
-                await edit_message_progressive(message, sent_message, text_to_display)
-
-    # Incrementar índice del spinner
-    user_chat["spinner_index"] = (spinner_index + 1) % len(SPINNER_FRAMES)
-    return sent_message
-
-
-async def transition_to_content_mode(
-    message: types.Message, sent_message: types.Message, full_response: str
-) -> types.Message:
-    """
-    Smoothly transition from pure spinner to content mode when first token arrives.
-
-    Args:
-        message: Original user message
-        sent_message: Current spinner message
-        full_response: First chunk of response text
-
-    Returns:
-        Updated sent_message with content + spinner
-    """
-    user_chat = ACTIVE_CHATS.get(message.from_user.id, {})
-    current_frame = SPINNER_FRAMES[user_chat.get("spinner_index", 0)]
-    initial_text = f"{full_response.strip()}\n\n`{current_frame}`"
-
-    if sent_message is None:
-        sent_message = await bot.send_message(
-            chat_id=message.chat.id,
-            text=initial_text,
-            parse_mode=ParseMode.MARKDOWN,
-        )
-    else:
-        # Solo editar si el contenido es diferente
-        if sent_message.text != initial_text:
-            await edit_message_progressive(message, sent_message, initial_text)
-    return sent_message
-
-
 async def ollama_request(message: types.Message, prompt: str = None):
     """
     Main request handler for interacting with Ollama API.
@@ -453,10 +344,7 @@ async def ollama_request(message: types.Message, prompt: str = None):
             cleanup_inactive_chats(timeout_hours=12)
 
         full_response = ""
-        last_edit_time = 0
-        last_spinner_update = 0
         sent_message = None
-        spinner_pure_mode = True
         await bot.send_chat_action(message.chat.id, "typing")
         image_base64 = await process_image(message)
 
@@ -481,85 +369,43 @@ async def ollama_request(message: types.Message, prompt: str = None):
         )
         payload = ACTIVE_CHATS.get(message.from_user.id)
 
-        # Inicializar spinner
-        user_chat = ACTIVE_CHATS.get(message.from_user.id, {})
-        user_chat["spinner_index"] = 0
+        # Reset spinner state for this user
+        state.spinner_manager.reset(message.from_user.id)
 
         async for response_data in generate(payload, state.modelname, prompt):
-            current_time = time.time()
             msg = response_data.get("message")
 
-            # Actualizar spinner independientemente del contenido
-            if current_time - last_spinner_update >= SPINNER_UPDATE_INTERVAL:
-                sent_message = await update_spinner(
-                    message, sent_message, full_response, spinner_pure_mode
-                )
-                last_spinner_update = current_time
+            # Update spinner independently of content (time-based)
+            sent_message = await state.spinner_manager.update(message, full_response)
 
             if msg is None:
                 continue
             chunk = msg.get("content", "")
             full_response += chunk
 
-            # Al llegar el primer contenido, cambiar a modo con contenido
-            if spinner_pure_mode and full_response.strip():
-                spinner_pure_mode = False
-                # Transición suave: combinar contenido actual con spinner
-                sent_message = await transition_to_content_mode(
-                    message, sent_message, full_response
+            # Transition to content mode on first token
+            if state.spinner_manager.get_mode(message.from_user.id) == "pure" and full_response.strip():
+                sent_message = await state.spinner_manager.transition_to_content(message, full_response)
+
+            # Handle paragraph breaks for faster updates
+            has_paragraph_break = chunk.endswith("\n\n") or "\n\n" in chunk
+            if has_paragraph_break:
+                # Force immediate update with faster interval
+                sent_message = await state.spinner_manager.update(
+                    message, full_response, force_mode="content"
                 )
 
             if sent_message is None and full_response.strip():
-                # Si llegamos aquí, ya hay contenido, mostrarlo con spinner (MARKDOWN)
-                initial_text = f"{full_response.strip()}\n\n`{SPINNER_FRAMES[0]}`"
+                # Fallback: send initial message with spinner if not sent yet
+                initial_text = f"{full_response.strip()}\n\n`{state.spinner_manager.FRAMES[0]}`"
                 sent_message = await bot.send_message(
                     chat_id=message.chat.id,
                     text=initial_text,
                     parse_mode=ParseMode.MARKDOWN,
                 )
-                last_edit_time = current_time
-                user_chat["spinner_index"] = 1
-
-            has_paragraph_break = chunk.endswith("\n\n") or "\n\n" in chunk
-            should_edit = (current_time - last_edit_time >= SPINNER_UPDATE_WITH_CONTENT) or (
-                has_paragraph_break and current_time - last_edit_time >= SPINNER_UPDATE_PARAGRAPH
-            )
-
-            if should_edit and not response_data.get("done"):
-                display_text = full_response.strip()
-                if display_text:
-                    spinner_index = user_chat.get("spinner_index", 0)
-                    current_spinner_frame = SPINNER_FRAMES[spinner_index]
-                    text_to_display = f"{display_text}\n\n`{current_spinner_frame}`"
-                    user_chat["spinner_index"] = (spinner_index + 1) % len(SPINNER_FRAMES)
-
-                    if len(text_to_display) > 4000:
-                        # If the display text is too long, find a safe split in the *raw* response
-                        split_pos = find_safe_split_pos(full_response, 4000)
-                        chunk_to_send = full_response[:split_pos]
-                        remaining_text = full_response[split_pos:]
-
-                        await bot.edit_message_text(
-                            chat_id=message.chat.id,
-                            message_id=sent_message.message_id,
-                            text=chunk_to_send.strip(),
-                            parse_mode=ParseMode.MARKDOWN,
-                        )
-                        # Create a new message for the rest of the content
-                        sent_message = await bot.send_message(
-                            chat_id=message.chat.id,
-                            text=f"`{SPINNER_FRAMES[0]}`",  # Initial text for the new message
-                            parse_mode=ParseMode.MARKDOWN,
-                        )
-                        full_response = remaining_text
-                        spinner_pure_mode = False  # Ya hay contenido
-                    else:
-                        # Solo editar si el contenido ha cambiado
-                        if sent_message is None or sent_message.text != text_to_display:
-                            await edit_message_progressive(message, sent_message, text_to_display)
-                    last_edit_time = current_time
 
             if response_data.get("done"):
+                # Final response: remove spinner and send complete message(s)
                 final_text = f"{full_response.strip()}\n\n⚡ `{state.modelname} in {response_data.get('total_duration') / 1e9:.1f}s.`"
                 message_chunks = smart_split(final_text)
                 if len(message_chunks) == 1:
@@ -593,13 +439,7 @@ async def ollama_request(message: types.Message, prompt: str = None):
         logging.error(f"Ollama HTTP error {e.status}: {e.message}", exc_info=True)
 
         # Limpiar spinner si existe
-        if sent_message:
-            try:
-                await bot.delete_message(
-                    chat_id=message.chat.id, message_id=sent_message.message_id
-                )
-            except Exception as delete_error:
-                logging.warning(f"Could not delete spinner: {delete_error}")
+        await state.spinner_manager.delete_if_exists(message)
 
         # Mensaje específico según código HTTP
         if e.status == 404:
@@ -619,13 +459,7 @@ async def ollama_request(message: types.Message, prompt: str = None):
         logging.error(f"Ollama connection error: {e}", exc_info=True)
 
         # Limpiar spinner si existe
-        if sent_message:
-            try:
-                await bot.delete_message(
-                    chat_id=message.chat.id, message_id=sent_message.message_id
-                )
-            except Exception as delete_error:
-                logging.warning(f"Could not delete spinner: {delete_error}")
+        await state.spinner_manager.delete_if_exists(message)
 
         error_msg = "❌ Cannot connect to Ollama. Please check if the server is running at the configured URL."
         await bot.send_message(
@@ -638,13 +472,7 @@ async def ollama_request(message: types.Message, prompt: str = None):
         logging.error("Ollama request timeout", exc_info=True)
 
         # Limpiar spinner si existe
-        if sent_message:
-            try:
-                await bot.delete_message(
-                    chat_id=message.chat.id, message_id=sent_message.message_id
-                )
-            except Exception as delete_error:
-                logging.warning(f"Could not delete spinner: {delete_error}")
+        await state.spinner_manager.delete_if_exists(message)
 
         error_msg = (
             "❌ Ollama is taking too long to respond. Try a shorter prompt or check the model."
@@ -659,13 +487,7 @@ async def ollama_request(message: types.Message, prompt: str = None):
         logging.error(f"Unexpected error in ollama_request: {e}", exc_info=True)
 
         # Limpiar spinner si existe
-        if sent_message:
-            try:
-                await bot.delete_message(
-                    chat_id=message.chat.id, message_id=sent_message.message_id
-                )
-            except Exception as delete_error:
-                logging.warning(f"Could not delete spinner: {delete_error}")
+        await state.spinner_manager.delete_if_exists(message)
 
         error_msg = "❌ An unexpected error occurred. The incident has been logged."
         await bot.send_message(

@@ -5,6 +5,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from dotenv import load_dotenv
 
 from bot.core.database import get_user_prompt, get_global_prompts, get_bot_config
+from bot.utils.spinner import SpinnerManager
 
 # Load environment variables
 load_dotenv()
@@ -21,6 +22,9 @@ ACTIVE_CHATS = {}
 modelname = os.getenv("INITMODEL")  # Default from .env initially
 
 mention = None
+
+# Spinner manager for handling animated indicators
+spinner_manager: SpinnerManager | None = None
 
 
 # --- Function to load model from DB after initialization ---

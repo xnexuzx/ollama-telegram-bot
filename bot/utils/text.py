@@ -1,28 +1,8 @@
-import tiktoken
+"""
+Text processing utilities for the Ollama Telegram bot.
+"""
 
-
-def count_tokens(text: str) -> int:
-    """
-    Counts the number of tokens in a given text.
-
-    This function tries to use the 'tiktoken' library for an accurate count.
-    If 'tiktoken' fails (e.g., due to an unsupported model encoding),
-    it falls back to a simple word-based estimation.
-
-    Args:
-        text: The input string.
-
-    Returns:
-        The estimated number of tokens.
-    """
-    try:
-        # The "cl100k_base" encoding is widely used by many popular models.
-        encoding = tiktoken.get_encoding("cl100k_base")
-        return len(encoding.encode(text))
-    except Exception:
-        # Fallback to a simple heuristic if tiktoken fails.
-        # This is not perfectly accurate but provides a reasonable estimate.
-        return len(text.split())
+from typing import List
 
 
 def find_safe_split_pos(text: str, max_length: int) -> int:
@@ -63,7 +43,7 @@ def find_safe_split_pos(text: str, max_length: int) -> int:
     return split_pos
 
 
-def smart_split(text: str, max_length: int = 4000) -> list[str]:
+def smart_split(text: str, max_length: int = 4000) -> List[str]:
     """
     Splits a long text into smaller chunks using a safe splitting logic.
 

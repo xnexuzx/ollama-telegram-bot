@@ -211,8 +211,10 @@ users.db
 # Planes de proyecto antiguos
 .kilocode/
 
+# Planes de proyecto
+.kilo
+
 #Scripts locales
 scripts_guide.md
 start_bot.bat
 stop_bot.bat
-cred.txt

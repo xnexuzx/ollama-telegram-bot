@@ -10,11 +10,10 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 # Import shared state and core functions
 from bot.state import bot, dp, set_modelname_from_db
 from bot.core.database import init_db
+from bot.utils.spinner import SpinnerManager
 
-# Import routers
-from bot.handlers.admin import admin_router
-from bot.handlers.chats import chat_router
-from bot.handlers.user import user_router
+# Routers will be imported after spinner_manager initialization
+# (import statements moved inside main())
 
 
 async def main():
@@ -23,6 +22,15 @@ async def main():
 
     # Load saved model from database (if exists)
     set_modelname_from_db()
+
+    # Initialize spinner manager BEFORE importing any handlers
+    import bot.state as state_module
+    state_module.spinner_manager = SpinnerManager(bot)
+
+    # Import routers AFTER spinner_manager is set (handlers depend on it)
+    from bot.handlers.admin import admin_router
+    from bot.handlers.chats import chat_router
+    from bot.handlers.user import user_router
 
     # Set bot commands
     commands = [
