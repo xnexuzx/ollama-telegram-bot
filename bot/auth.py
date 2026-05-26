@@ -44,14 +44,15 @@ def perms_admins(func):
                 return await func(query=query, **kwargs)
         else:
             if message:
-                if message and message.chat.type in ["supergroup", "group"]:
+                if message.chat.type in ["supergroup", "group"]:
                     return
                 await message.answer("Access Denied")
                 logging.info(
                     f"[MSG] {message.from_user.first_name} {message.from_user.last_name}({message.from_user.id}) is not allowed to use this bot."
                 )
             elif query:
-                if message and message.chat.type in ["supergroup", "group"]:
+                # query.message is the message the button was attached to
+                if query.message and query.message.chat.type in ["supergroup", "group"]:
                     return
                 await query.answer("Access Denied")
                 logging.info(

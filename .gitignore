@@ -205,14 +205,15 @@ id_*
 # user dn
 users.db
 
-# Carpetas de respaldo
-.old-backups/
-
 # Planes de proyecto antiguos
 .kilocode/
 
 # Planes de proyecto
 .kilo
+
+# AI Context
+.ai/
+AGENTS.md
 
 #Scripts locales
 scripts_guide.md

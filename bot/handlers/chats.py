@@ -12,7 +12,7 @@ from bot.core.database import (
     delete_chat_session,
 )
 from bot.ui import ChatCreationStates
-from bot.state import ACTIVE_CHATS, modelname, ensure_system_prompt
+import bot.state as state_module
 
 chat_router = Router()
 
@@ -21,9 +21,9 @@ chat_router = Router()
 @perms_allowed
 async def command_reset_handler(message: types.Message) -> None:
     user_id = message.from_user.id
-    if user_id in ACTIVE_CHATS:
-        ACTIVE_CHATS[user_id]["messages"] = await ensure_system_prompt(user_id, [])
-        ACTIVE_CHATS[user_id]["active_session_id"] = None
+    if user_id in state_module.ACTIVE_CHATS:
+        state_module.ACTIVE_CHATS[user_id]["messages"] = await state_module.ensure_system_prompt(user_id, [])
+        state_module.ACTIVE_CHATS[user_id]["active_session_id"] = None
     logging.info(f"Chat has been reset for {message.from_user.first_name}.")
     await message.answer("✅ Chat reset. You are now in a temporary chat.")
 
@@ -69,10 +69,10 @@ async def chat_name_handler(message: types.Message, state: FSMContext):
 
     session_id = create_chat_session(user_id, chat_name)
     await state.clear()
-    messages = await ensure_system_prompt(user_id, [])
-    ACTIVE_CHATS[user_id] = {
+    messages = await state_module.ensure_system_prompt(user_id, [])
+    state_module.ACTIVE_CHATS[user_id] = {
         "active_session_id": session_id,
-        "model": modelname,
+        "model": state_module.modelname,  # Access via module to always get current value
         "messages": messages,
         "stream": True,
     }
@@ -85,10 +85,10 @@ async def switch_chat_handler(query: types.CallbackQuery):
     session_id = query.data.split("_")[1]
     user_id = query.from_user.id
     history = load_chat_history(session_id)
-    messages = await ensure_system_prompt(user_id, history)
-    ACTIVE_CHATS[user_id] = {
+    messages = await state_module.ensure_system_prompt(user_id, history)
+    state_module.ACTIVE_CHATS[user_id] = {
         "active_session_id": session_id,
-        "model": modelname,
+        "model": state_module.modelname,  # Access via module to always get current value
         "messages": messages,
         "stream": True,
     }
@@ -114,11 +114,20 @@ async def delete_chat_menu_handler(query: types.CallbackQuery):
 
 
 @chat_router.callback_query(lambda query: query.data == "chat_menu_main")
+@perms_allowed
 async def chat_menu_main_handler(query: types.CallbackQuery):
-    # This handler needs access to the original message to re-trigger the command
-    # A better approach will be designed in the final step.
-    # For now, we just call the function directly.
-    await command_chat_handler(query.message)
+    user_id = query.from_user.id
+    sessions = get_user_chat_sessions(user_id)
+    chat_kb = InlineKeyboardBuilder()
+    for session_id, name in sessions:
+        chat_kb.row(types.InlineKeyboardButton(text=name, callback_data=f"switchchat_{session_id}"))
+    if len(sessions) < 10:
+        chat_kb.row(types.InlineKeyboardButton(text="➕ New Chat", callback_data="newchat"))
+    else:
+        chat_kb.row(types.InlineKeyboardButton(text="⚠️ Chats limit reached", callback_data="noop"))
+    chat_kb.row(types.InlineKeyboardButton(text="🗑️ Delete Chat", callback_data="deletechat_menu"))
+    chat_kb.row(types.InlineKeyboardButton(text="❌ Close", callback_data="close_menu"))
+    await query.message.edit_text("Chat Management", reply_markup=chat_kb.as_markup())
     await query.answer()
 
 
@@ -128,9 +137,9 @@ async def delete_session_handler(query: types.CallbackQuery):
     session_id = query.data.split("_")[2]
     user_id = query.from_user.id
     if delete_chat_session(session_id, user_id):
-        if ACTIVE_CHATS.get(user_id, {}).get("active_session_id") == session_id:
-            ACTIVE_CHATS[user_id]["active_session_id"] = None
-            ACTIVE_CHATS[user_id]["messages"] = await ensure_system_prompt(user_id, [])
+        if state_module.ACTIVE_CHATS.get(user_id, {}).get("active_session_id") == session_id:
+            state_module.ACTIVE_CHATS[user_id]["active_session_id"] = None
+            state_module.ACTIVE_CHATS[user_id]["messages"] = await state_module.ensure_system_prompt(user_id, [])
         await query.answer("Chat deleted successfully.")
     else:
         await query.answer("Failed to delete chat.")

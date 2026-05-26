@@ -4,8 +4,9 @@ import asyncio
 import logging
 from aiogram import types
 
-# Add project root to PYTHONPATH
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+# Ensure the parent directory is in sys.path when run directly as a script
+if __name__ == "__main__" and not __package__:
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 # Import shared state and core functions
 from bot.state import bot, dp, set_modelname_from_db

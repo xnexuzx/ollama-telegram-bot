@@ -15,19 +15,8 @@ from bot.core.database import get_global_prompts, update_user_prompt, save_chat_
 from bot.core.ollama import generate, model_supports_vision
 from bot.ui import start_kb
 from bot.utils import smart_split
-from system_prompts import get_all_system_prompts
-
-# WARNING: Circular dependencies. This is a temporary step in refactoring.
-# These state variables will be managed properly in the next steps.
-from bot import state
-from bot.state import (
-    bot,
-    ACTIVE_CHATS,
-    mention,
-    get_bot_info,
-    ensure_system_prompt,
-    cleanup_inactive_chats,
-)
+from bot.system_prompts import get_all_system_prompts
+import bot.state as state
 
 user_router = Router()
 
@@ -59,8 +48,8 @@ async def command_get_context_handler(message: types.Message) -> None:
 
     Displays the current conversation history for the user in Markdown format.
     """
-    if message.from_user.id in ACTIVE_CHATS:
-        messages = ACTIVE_CHATS.get(message.from_user.id)["messages"]
+    if message.from_user.id in state.ACTIVE_CHATS:
+        messages = state.ACTIVE_CHATS.get(message.from_user.id)["messages"]
         context = ""
         for msg in messages:
             context += f"*{msg['role'].capitalize()}*: {msg['content']}\n"
@@ -181,7 +170,7 @@ async def handle_message(message: types.Message) -> None:
     - Private chats: direct processing
     - Groups/supergroups: only if bot is mentioned or replied to
     """
-    await get_bot_info()
+    await state.get_bot_info()
     if message.chat.type == "private":
         await ollama_request(message)
         return
@@ -201,10 +190,10 @@ async def is_mentioned_in_group_or_supergroup(message: types.Message) -> bool:
     """
     if message.chat.type not in ["group", "supergroup"]:
         return False
-    is_mentioned = (message.text and message.text.startswith(mention)) or (
-        message.caption and message.caption.startswith(mention)
+    is_mentioned = (message.text and message.text.startswith(state.mention)) or (
+        message.caption and message.caption.startswith(state.mention)
     )
-    is_reply_to_bot = message.reply_to_message and message.reply_to_message.from_user.id == bot.id
+    is_reply_to_bot = message.reply_to_message and message.reply_to_message.from_user.id == state.bot.id
     return is_mentioned or is_reply_to_bot
 
 
@@ -239,7 +228,7 @@ def format_thread_for_prompt(thread) -> str:
     """
     prompt = "Conversation thread:\n\n"
     for msg in thread:
-        sender = "User" if msg.from_user.id != bot.id else "Bot"
+        sender = "User" if msg.from_user.id != state.bot.id else "Bot"
         content = msg.text or msg.caption or "[No text content]"
         prompt += f"{sender}: {content}\n\n"
     prompt += "History:"
@@ -259,7 +248,7 @@ async def process_image(message: types.Message) -> str:
     image_base64 = ""
     if message.content_type == "photo":
         image_buffer = io.BytesIO()
-        await bot.download(message.photo[-1], destination=image_buffer)
+        await state.bot.download(message.photo[-1], destination=image_buffer)
         image_base64 = base64.b64encode(image_buffer.getvalue()).decode("utf-8")
     return image_base64
 
@@ -273,8 +262,8 @@ async def add_prompt_to_active_chats(
     Ensures system prompt is at the beginning and updates last_activity timestamp.
     """
     user_id = message.from_user.id
-    if user_id not in ACTIVE_CHATS:
-        ACTIVE_CHATS[user_id] = {
+    if user_id not in state.ACTIVE_CHATS:
+        state.ACTIVE_CHATS[user_id] = {
             "active_session_id": None,
             "model": state.modelname,
             "messages": [],
@@ -282,9 +271,9 @@ async def add_prompt_to_active_chats(
             "last_activity": time.time(),
         }
     else:
-        ACTIVE_CHATS[user_id]["last_activity"] = time.time()
-    messages = ACTIVE_CHATS[user_id]["messages"]
-    messages = await ensure_system_prompt(user_id, messages)
+        state.ACTIVE_CHATS[user_id]["last_activity"] = time.time()
+    messages = state.ACTIVE_CHATS[user_id]["messages"]
+    messages = await state.ensure_system_prompt(user_id, messages)
     messages.append(
         {
             "role": "user",
@@ -292,7 +281,7 @@ async def add_prompt_to_active_chats(
             "images": ([image_base64] if image_base64 else []),
         }
     )
-    ACTIVE_CHATS[user_id]["messages"] = messages
+    state.ACTIVE_CHATS[user_id]["messages"] = messages
 
 
 async def handle_response(message: types.Message, response_data: dict, full_response: str) -> bool:
@@ -311,8 +300,8 @@ async def handle_response(message: types.Message, response_data: dict, full_resp
     if full_response_stripped == "":
         return False
     if response_data.get("done"):
-        if ACTIVE_CHATS.get(message.from_user.id) is not None:
-            ACTIVE_CHATS[message.from_user.id]["messages"].append(
+        if state.ACTIVE_CHATS.get(message.from_user.id) is not None:
+            state.ACTIVE_CHATS[message.from_user.id]["messages"].append(
                 {"role": "assistant", "content": full_response_stripped}
             )
         logging.info(
@@ -340,18 +329,18 @@ async def ollama_request(message: types.Message, prompt: str = None):
     """
     try:
         # Limpieza automática de chats inactivos (umbral: 100 entradas)
-        if len(ACTIVE_CHATS) > 100:
-            cleanup_inactive_chats(timeout_hours=12)
+        if len(state.ACTIVE_CHATS) > 100:
+            state.cleanup_inactive_chats(timeout_hours=12)
 
         full_response = ""
         sent_message = None
-        await bot.send_chat_action(message.chat.id, "typing")
+        await state.bot.send_chat_action(message.chat.id, "typing")
         image_base64 = await process_image(message)
 
         # Validate image support if an image was provided
         if image_base64:
             if not model_supports_vision(state.modelname):
-                await bot.send_message(
+                await state.bot.send_message(
                     chat_id=message.chat.id,
                     text=f"❌ The model '{state.modelname}' does not support image input. "
                     f"Please switch to a vision-capable model using /settings.",
@@ -361,13 +350,13 @@ async def ollama_request(message: types.Message, prompt: str = None):
 
         if prompt is None:
             prompt = message.text or message.caption
-        session_id = ACTIVE_CHATS.get(message.from_user.id, {}).get("active_session_id")
+        session_id = state.ACTIVE_CHATS.get(message.from_user.id, {}).get("active_session_id")
         save_chat_message(message.from_user.id, session_id, "user", prompt)
         await add_prompt_to_active_chats(message, prompt, image_base64, state.modelname)
         logging.info(
             f"[OllamaAPI]: Processing '{prompt}' for {message.from_user.first_name} {message.from_user.last_name}"
         )
-        payload = ACTIVE_CHATS.get(message.from_user.id)
+        payload = state.ACTIVE_CHATS.get(message.from_user.id)
 
         # Reset spinner state for this user
         state.spinner_manager.reset(message.from_user.id)
@@ -398,7 +387,7 @@ async def ollama_request(message: types.Message, prompt: str = None):
             if sent_message is None and full_response.strip():
                 # Fallback: send initial message with spinner if not sent yet
                 initial_text = f"{full_response.strip()}\n\n`{state.spinner_manager.FRAMES[0]}`"
-                sent_message = await bot.send_message(
+                sent_message = await state.bot.send_message(
                     chat_id=message.chat.id,
                     text=initial_text,
                     parse_mode=ParseMode.MARKDOWN,
@@ -409,27 +398,27 @@ async def ollama_request(message: types.Message, prompt: str = None):
                 final_text = f"{full_response.strip()}\n\n⚡ `{state.modelname} in {response_data.get('total_duration') / 1e9:.1f}s.`"
                 message_chunks = smart_split(final_text)
                 if len(message_chunks) == 1:
-                    await bot.edit_message_text(
+                    await state.bot.edit_message_text(
                         chat_id=message.chat.id,
                         message_id=sent_message.message_id,
                         text=message_chunks[0],
                         parse_mode=ParseMode.MARKDOWN,
                     )
                 else:
-                    await bot.edit_message_text(
+                    await state.bot.edit_message_text(
                         chat_id=message.chat.id,
                         message_id=sent_message.message_id,
                         text=message_chunks[0],
                         parse_mode=ParseMode.MARKDOWN,
                     )
                     for chunk in message_chunks[1:]:
-                        await bot.send_message(
+                        await state.bot.send_message(
                             chat_id=message.chat.id,
                             text=chunk,
                             parse_mode=ParseMode.MARKDOWN,
                         )
                 await handle_response(message, response_data, full_response)
-                session_id = ACTIVE_CHATS.get(message.from_user.id, {}).get("active_session_id")
+                session_id = state.ACTIVE_CHATS.get(message.from_user.id, {}).get("active_session_id")
                 save_chat_message(
                     message.from_user.id, session_id, "assistant", full_response.strip()
                 )
@@ -449,7 +438,7 @@ async def ollama_request(message: types.Message, prompt: str = None):
         else:
             error_msg = f"❌ Ollama returned HTTP {e.status}. Please check the server logs."
 
-        await bot.send_message(
+        await state.bot.send_message(
             chat_id=message.chat.id,
             text=error_msg,
             parse_mode=ParseMode.HTML,
@@ -462,7 +451,7 @@ async def ollama_request(message: types.Message, prompt: str = None):
         await state.spinner_manager.delete_if_exists(message)
 
         error_msg = "❌ Cannot connect to Ollama. Please check if the server is running at the configured URL."
-        await bot.send_message(
+        await state.bot.send_message(
             chat_id=message.chat.id,
             text=error_msg,
             parse_mode=ParseMode.HTML,
@@ -477,7 +466,7 @@ async def ollama_request(message: types.Message, prompt: str = None):
         error_msg = (
             "❌ Ollama is taking too long to respond. Try a shorter prompt or check the model."
         )
-        await bot.send_message(
+        await state.bot.send_message(
             chat_id=message.chat.id,
             text=error_msg,
             parse_mode=ParseMode.HTML,
@@ -490,7 +479,7 @@ async def ollama_request(message: types.Message, prompt: str = None):
         await state.spinner_manager.delete_if_exists(message)
 
         error_msg = "❌ An unexpected error occurred. The incident has been logged."
-        await bot.send_message(
+        await state.bot.send_message(
             chat_id=message.chat.id,
             text=error_msg,
             parse_mode=ParseMode.HTML,

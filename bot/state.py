@@ -81,7 +81,7 @@ async def ensure_system_prompt(user_id: int, messages: list[dict]) -> list[dict]
     - A predefined prompt key string ("default", "code", etc.)
     - A custom prompt ID (stored as string in DB)
     """
-    from system_prompts import SYSTEM_PROMPTS
+    from bot.system_prompts import SYSTEM_PROMPTS
 
     selected_prompt_id = get_user_prompt(user_id)
     system_prompt_content = ""

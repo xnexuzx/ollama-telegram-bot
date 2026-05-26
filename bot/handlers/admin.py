@@ -97,6 +97,8 @@ async def delete_model_confirm_handler(query: types.CallbackQuery):
     response = await manage_model("delete", modelname_to_delete)
     if response.status == 200:
         await query.answer(f"Deleted model: {modelname_to_delete}")
+        # Refresh the delete menu to show the updated model list
+        await delete_model_callback_handler(query)
     else:
         await query.answer(f"Failed to delete model: {modelname_to_delete}")
 
@@ -125,7 +127,8 @@ async def remove_user_from_list_handler(query: types.CallbackQuery):
     user_id = int(query.data.split("_")[1])
     if remove_user_from_db(user_id):
         await query.answer(f"User {user_id} has been removed.")
-        await query.message.edit_text(f"User {user_id} has been removed.")
+        # Refresh the allowed users list immediately
+        await list_users_callback_handler(query)
     else:
         await query.answer(f"User {user_id} not found.")
 
